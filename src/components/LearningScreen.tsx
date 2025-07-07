@@ -53,6 +53,11 @@ const LearningScreen: React.FC = () => {
   const [showFeedback, setShowFeedback] = useState<boolean>(false);
   const [feedbackCorrect, setFeedbackCorrect] = useState<boolean>(false);
   
+  // Audio recording states
+  const [isRecording, setIsRecording] = useState<boolean>(false);
+  const [isAudioPlaying, setIsAudioPlaying] = useState<boolean>(false);
+  const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
+  
   // Sequential processing state
   const [commandQueue, setCommandQueue] = useState<CommandMessage[]>([]);
   const [shouldProcessNext, setShouldProcessNext] = useState<boolean>(false);
@@ -61,6 +66,7 @@ const LearningScreen: React.FC = () => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const completionCallbackRef = useRef<(() => void) | null>(null);
   const isProcessingRef = useRef<boolean>(false);  // Synchronous processing state
+  const audioChunksRef = useRef<Blob[]>([]);  // Use ref for audio chunks to avoid stale closure issues
 
   // Effect to handle queue processing
   useEffect(() => {
@@ -150,7 +156,9 @@ const LearningScreen: React.FC = () => {
         
       case 'FINISH_MODULE':
         setShowFinishButton(true);
-        // Completion will be handled by continue button click
+        // Mark command as complete immediately so other commands can be processed
+        // The button will remain visible until user clicks it
+        markCommandComplete();
         break;
         
       default:
@@ -169,11 +177,15 @@ const LearningScreen: React.FC = () => {
       if (audioRef.current) {
         audioRef.current.src = audioUrl;
         
+        // Set audio playing state
+        setIsAudioPlaying(true);
+        
         // Set up completion callback
         const handleAudioEnd = () => {
           audioRef.current?.removeEventListener('ended', handleAudioEnd);
           audioRef.current?.removeEventListener('error', handleAudioError);
           URL.revokeObjectURL(audioUrl);
+          setIsAudioPlaying(false);
           markCommandComplete();
         };
         
@@ -182,6 +194,7 @@ const LearningScreen: React.FC = () => {
           audioRef.current?.removeEventListener('ended', handleAudioEnd);
           audioRef.current?.removeEventListener('error', handleAudioError);
           URL.revokeObjectURL(audioUrl);
+          setIsAudioPlaying(false);
           markCommandComplete();
         };
         
@@ -196,6 +209,78 @@ const LearningScreen: React.FC = () => {
     } catch (error) {
       console.error('Error processing audio:', error);
       markCommandComplete();
+    }
+  };
+
+  // Start audio recording
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+      
+      recorder.onstop = () => {
+        stream.getTracks().forEach(track => track.stop());
+        setIsRecording(false);
+      };
+      
+      setMediaRecorder(recorder);
+      audioChunksRef.current = [];
+      recorder.start();
+      setIsRecording(true);
+    } catch (error) {
+      console.error('Error starting recording:', error);
+      alert('Error accessing microphone. Please check permissions.');
+    }
+  };
+
+  // Stop audio recording and send to WebSocket
+  const stopRecording = () => {
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+      mediaRecorder.stop();
+      
+      // Process audio chunks after recording stops
+      mediaRecorder.addEventListener('stop', () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
+        
+        // Convert blob to base64
+        const reader = new FileReader();
+        reader.onload = () => {
+          const base64Audio = reader.result as string;
+          const audioBytes = base64Audio.split(',')[1]; // Remove data URL prefix
+          
+          // Send to WebSocket
+          if (websocketRef.current && sessionData?.id) {
+            const studentInteractionMessage = {
+              type: "student_interaction",
+              interaction: {
+                type: "speech",
+                audio_bytes: audioBytes
+              },
+              session_id: sessionData.id
+            };
+            console.log('Sending student speech interaction:', studentInteractionMessage);
+            websocketRef.current.send(JSON.stringify(studentInteractionMessage));
+          }
+        };
+        reader.readAsDataURL(audioBlob);
+        
+        audioChunksRef.current = [];
+      }, { once: true });
+    }
+  };
+
+  // Toggle recording
+  const toggleRecording = () => {
+    if (isRecording) {
+      stopRecording();
+    } else {
+      startRecording();
     }
   };
 
@@ -323,7 +408,8 @@ const LearningScreen: React.FC = () => {
       websocketRef.current.send(JSON.stringify(nextPhaseMessage));
     }
     
-    markCommandComplete();
+    // No need to call markCommandComplete() here since FINISH_MODULE 
+    // command was already marked complete when the button was shown
   };
 
   // Add command to queue or process immediately
@@ -603,6 +689,71 @@ const LearningScreen: React.FC = () => {
           </button>
         </div>
       )}
+
+      {/* Interact Button */}
+      <div style={{
+        display: 'flex',
+        justifyContent: 'center',
+        marginTop: '20px'
+      }}>
+        <button
+          onClick={toggleRecording}
+          disabled={isAudioPlaying}
+          style={{
+            padding: '15px 30px',
+            backgroundColor: isRecording ? '#dc3545' : (isAudioPlaying ? '#6c757d' : '#007bff'),
+            color: 'white',
+            border: 'none',
+            borderRadius: '8px',
+            fontSize: '18px',
+            fontWeight: '600',
+            cursor: isAudioPlaying ? 'not-allowed' : 'pointer',
+            boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
+            transition: 'all 0.3s ease',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            opacity: isAudioPlaying ? 0.6 : 1
+          }}
+          onMouseOver={(e) => {
+            if (!isAudioPlaying) {
+              if (isRecording) {
+                e.currentTarget.style.backgroundColor = '#c82333';
+              } else {
+                e.currentTarget.style.backgroundColor = '#0056b3';
+              }
+              e.currentTarget.style.transform = 'translateY(-2px)';
+            }
+          }}
+          onMouseOut={(e) => {
+            if (!isAudioPlaying) {
+              if (isRecording) {
+                e.currentTarget.style.backgroundColor = '#dc3545';
+              } else {
+                e.currentTarget.style.backgroundColor = '#007bff';
+              }
+              e.currentTarget.style.transform = 'translateY(0)';
+            }
+          }}
+        >
+          <span style={{
+            fontSize: '20px',
+            animation: isRecording ? 'pulse 1s infinite' : 'none'
+          }}>
+            🎤
+          </span>
+          {isRecording ? 'Stop Recording' : (isAudioPlaying ? 'Audio Playing...' : 'Interact')}
+        </button>
+      </div>
+
+      {/* Add CSS for pulse animation */}
+      <style>{`
+        @keyframes pulse {
+          0% { opacity: 1; }
+          50% { opacity: 0.5; }
+          100% { opacity: 1; }
+        }
+      `}</style>
 
       {/* MCQ Question Popup */}
       {currentQuestion && !showFeedback && (
