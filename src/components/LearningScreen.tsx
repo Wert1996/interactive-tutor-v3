@@ -6,6 +6,7 @@ import '../styles/LearningScreen.css';
 import teacherImage from '../assets/characters/teacher.webp';
 import classmateImage from '../assets/characters/classmate.jpg';
 import studentImage from '../assets/characters/student.jpeg';
+import voiceChatIcon from '../assets/voice-chat-icon.jpg';
 
 interface SessionData {
   id: string;
@@ -45,6 +46,13 @@ interface CommandMessage {
   };
 }
 
+interface ChatMessage {
+  id: string;
+  sender: 'teacher' | 'classmate' | 'student';
+  message: string;
+  timestamp: Date;
+}
+
 const LearningScreen: React.FC = () => {
   const { courseId } = useParams<{ courseId: string }>();
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('disconnected');
@@ -57,6 +65,11 @@ const LearningScreen: React.FC = () => {
   const [selectedBinaryChoice, setSelectedBinaryChoice] = useState<'left' | 'right' | null>(null);
   const [showFeedback, setShowFeedback] = useState<boolean>(false);
   const [feedbackCorrect, setFeedbackCorrect] = useState<boolean>(false);
+  
+  // Chat messages state
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [isChatCollapsed, setIsChatCollapsed] = useState<boolean>(false);
+  const [notes, setNotes] = useState<string>('');
   
   // Audio recording states
   const [isRecording, setIsRecording] = useState<boolean>(false);
@@ -83,6 +96,25 @@ const LearningScreen: React.FC = () => {
   const completionCallbackRef = useRef<(() => void) | null>(null);
   const isProcessingRef = useRef<boolean>(false);  // Synchronous processing state
   const audioChunksRef = useRef<Blob[]>([]);  // Use ref for audio chunks to avoid stale closure issues
+  const chatContainerRef = useRef<HTMLDivElement | null>(null);
+
+  // Add chat message helper function
+  const addChatMessage = (sender: 'teacher' | 'classmate' | 'student', message: string) => {
+    const newMessage: ChatMessage = {
+      id: Date.now().toString(),
+      sender,
+      message,
+      timestamp: new Date()
+    };
+    setChatMessages(prev => [...prev, newMessage]);
+    
+    // Auto-scroll to bottom
+    setTimeout(() => {
+      if (chatContainerRef.current) {
+        chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+      }
+    }, 100);
+  };
 
   // Effect to handle queue processing
   useEffect(() => {
@@ -115,6 +147,11 @@ const LearningScreen: React.FC = () => {
         // Set teacher as speaking
         setSpeakingStates(prev => ({ ...prev, teacher: true }));
         
+        // Add teacher message to chat if text is available
+        if (payload.text) {
+          addChatMessage('teacher', payload.text);
+        }
+        
         if (payload.audio_bytes) {
           playAudioWithCallback(payload.audio_bytes);
         } else {
@@ -125,6 +162,11 @@ const LearningScreen: React.FC = () => {
       case 'CLASSMATE_SPEECH':
         // Set classmate as speaking
         setSpeakingStates(prev => ({ ...prev, classmate: true }));
+        
+        // Add classmate message to chat if text is available
+        if (payload.text) {
+          addChatMessage('classmate', payload.text);
+        }
         
         if (payload.audio_bytes) {
           // Wait 3 seconds before classmate speaks
@@ -501,6 +543,13 @@ const LearningScreen: React.FC = () => {
         case 'learning_content':
           break;
           
+        case 'student_speech':
+          // Add student message to chat
+          if (message.text) {
+            addChatMessage('student', message.text);
+          }
+          break;
+          
         case 'command':
           // Handle command messages with sequential processing
           if (message.command && message.command.command_type && message.command.payload) {
@@ -614,14 +663,15 @@ const LearningScreen: React.FC = () => {
     <div style={{ 
       minHeight: '100vh', 
       backgroundColor: 'white',
-      padding: '20px'
+      padding: '20px',
+      position: 'relative'
     }}>
-      {/* Connection Status */}
+      {/* Connection Status - Top Left */}
       <div style={{
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginBottom: '20px'
+        position: 'absolute',
+        top: '20px',
+        left: '20px',
+        zIndex: 100
       }}>
         <div className="connection-indicator">
           <div 
@@ -630,10 +680,10 @@ const LearningScreen: React.FC = () => {
               display: 'flex', 
               alignItems: 'center', 
               gap: '8px',
-              padding: '12px 24px',
-              borderRadius: '25px',
+              padding: '8px 16px',
+              borderRadius: '20px',
               backgroundColor: '#f8f9fa',
-              fontSize: '16px',
+              fontSize: '14px',
               fontWeight: '500',
               border: '1px solid #e9ecef',
               boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
@@ -643,13 +693,13 @@ const LearningScreen: React.FC = () => {
             <div 
               className="connection-dot"
               style={{
-                width: '10px',
-                height: '10px',
+                width: '8px',
+                height: '8px',
                 borderRadius: '50%',
                 backgroundColor: getConnectionStatusColor(),
               }}
             />
-            <span>{getConnectionStatusText()}</span>
+            <span>{connectionStatus === 'connected' ? 'Connected' : connectionStatus === 'connecting' ? 'Connecting...' : 'Disconnected'}</span>
           </div>
         </div>
       </div>
@@ -661,7 +711,8 @@ const LearningScreen: React.FC = () => {
       <div style={{
         display: 'flex',
         gap: '20px',
-        alignItems: 'flex-start'
+        alignItems: 'flex-start',
+        marginTop: '60px'
       }}>
         {/* Characters Panel */}
         <div style={{
@@ -794,8 +845,8 @@ const LearningScreen: React.FC = () => {
           border: '2px solid #e9ecef',
           borderRadius: '10px',
           padding: '20px',
-          minHeight: '70vh',
-          flex: 1,
+          minHeight: '75vh',
+          width: '65%',
           boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
           overflow: 'auto'
         }}>
@@ -827,6 +878,255 @@ const LearningScreen: React.FC = () => {
               Whiteboard content will appear here...
             </p>
           )}
+        </div>
+
+        {/* Right Panel - Notes and Chat */}
+        <div style={{
+          width: '350px',
+          display: 'flex',
+          flexDirection: 'column',
+          height: '85vh',
+          gap: '15px'
+        }}>
+          {/* Notes Area */}
+          <div style={{
+            backgroundColor: '#ffffff',
+            border: '2px solid #e9ecef',
+            borderRadius: '10px',
+            boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
+            display: 'flex',
+            flexDirection: 'column',
+            height: isChatCollapsed ? 'calc(70vh - 100px)' : 'calc(45vh - 7.5px)',
+            transition: 'height 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+            zIndex: 10
+          }}>
+            {/* Notes Header */}
+            <div style={{
+              padding: '15px 20px',
+              borderBottom: '2px solid #f8f9fa',
+              backgroundColor: '#f8f9fa'
+            }}>
+              <h3 style={{
+                margin: '0',
+                color: '#333',
+                fontSize: '16px',
+                fontWeight: '600'
+              }}>
+                📝 Notes
+              </h3>
+            </div>
+
+            {/* Notes Content */}
+            <div style={{
+              flex: 1,
+              padding: '15px'
+            }}>
+              <textarea
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="Take notes during the lesson..."
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  border: 'none',
+                  outline: 'none',
+                  resize: 'none',
+                  fontSize: '14px',
+                  fontFamily: 'inherit',
+                  lineHeight: '1.5',
+                  color: '#333',
+                  backgroundColor: 'transparent'
+                }}
+              />
+            </div>
+          </div>
+
+          {/* Live Chat Box */}
+          <div style={{
+            backgroundColor: '#ffffff',
+            border: '2px solid #e9ecef',
+            borderRadius: '10px',
+            boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
+            display: 'flex',
+            flexDirection: 'column',
+            height: isChatCollapsed ? '135px' : 'calc(45vh - 7.5px)',
+            transition: 'height 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+            zIndex: 20,
+            position: 'relative'
+          }}>
+            {/* Chat Header - Clickable */}
+            <div 
+              onClick={() => setIsChatCollapsed(!isChatCollapsed)}
+              style={{
+                padding: '15px 20px',
+                borderBottom: isChatCollapsed ? 'none' : '2px solid #f8f9fa',
+                backgroundColor: '#f8f9fa',
+                cursor: 'pointer',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                borderRadius: isChatCollapsed ? '8px' : '8px 8px 0 0',
+                transition: 'all 0.3s ease'
+              }}
+              onMouseOver={(e) => {
+                e.currentTarget.style.backgroundColor = '#e9ecef';
+              }}
+              onMouseOut={(e) => {
+                e.currentTarget.style.backgroundColor = '#f8f9fa';
+              }}
+            >
+              <h3 style={{
+                margin: '0',
+                color: '#333',
+                fontSize: '16px',
+                fontWeight: '600'
+              }}>
+                💬 Live Chat
+              </h3>
+              <span style={{
+                fontSize: '14px',
+                color: '#6c757d',
+                transform: isChatCollapsed ? 'rotate(180deg)' : 'rotate(0deg)',
+                transition: 'transform 0.3s ease'
+              }}>
+                ▼
+              </span>
+            </div>
+
+            {!isChatCollapsed && (
+              /* Chat Messages */
+              <div 
+                ref={chatContainerRef}
+                style={{
+                  flex: 1,
+                  padding: '15px',
+                  overflowY: 'auto',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '12px'
+                }}
+              >
+                {chatMessages.length === 0 ? (
+                  <p style={{
+                    color: '#6c757d',
+                    fontStyle: 'italic',
+                    textAlign: 'center',
+                    margin: '20px 0'
+                  }}>
+                    Chat messages will appear here...
+                  </p>
+                ) : (
+                  chatMessages.map((msg) => (
+                    <div key={msg.id} style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '4px',
+                      padding: '8px 12px',
+                      borderRadius: '8px',
+                      backgroundColor: msg.sender === 'teacher' ? '#e8f5e8' : 
+                                      msg.sender === 'classmate' ? '#fff3cd' : '#e7f3ff',
+                      borderLeft: `4px solid ${msg.sender === 'teacher' ? '#28a745' : 
+                                              msg.sender === 'classmate' ? '#ffc107' : '#007bff'}`
+                    }}>
+                      <div style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center'
+                      }}>
+                        <span style={{
+                          fontSize: '12px',
+                          fontWeight: '600',
+                          color: msg.sender === 'teacher' ? '#28a745' : 
+                                 msg.sender === 'classmate' ? '#856404' : '#0056b3'
+                        }}>
+                          {msg.sender === 'teacher' ? 'Ms. Milie' : 
+                           msg.sender === 'classmate' ? 'Sam' : 'You'}
+                        </span>
+                        <span style={{
+                          fontSize: '10px',
+                          color: '#6c757d'
+                        }}>
+                          {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      </div>
+                      <p style={{
+                        margin: '0',
+                        fontSize: '14px',
+                        color: '#333',
+                        lineHeight: '1.4'
+                      }}>
+                        {msg.message}
+                      </p>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+
+            {/* Chat Input Area - Always Visible */}
+            <div style={{
+              padding: '15px',
+              borderTop: '1px solid #e9ecef',
+              backgroundColor: '#f8f9fa',
+              borderRadius: '0 0 8px 8px',
+              marginTop: 'auto'
+            }}>
+              <button
+                onClick={toggleRecording}
+                disabled={isAudioPlaying}
+                style={{
+                  width: '100%',
+                  padding: '12px 20px',
+                  backgroundColor: isRecording ? '#dc3545' : (isAudioPlaying ? '#6c757d' : '#007bff'),
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  fontSize: '16px',
+                  fontWeight: '600',
+                  cursor: isAudioPlaying ? 'not-allowed' : 'pointer',
+                  boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+                  transition: 'all 0.3s ease',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
+                  opacity: isAudioPlaying ? 0.6 : 1
+                }}
+                onMouseOver={(e) => {
+                  if (!isAudioPlaying) {
+                    if (isRecording) {
+                      e.currentTarget.style.backgroundColor = '#c82333';
+                    } else {
+                      e.currentTarget.style.backgroundColor = '#0056b3';
+                    }
+                    e.currentTarget.style.transform = 'translateY(-1px)';
+                  }
+                }}
+                onMouseOut={(e) => {
+                  if (!isAudioPlaying) {
+                    if (isRecording) {
+                      e.currentTarget.style.backgroundColor = '#dc3545';
+                    } else {
+                      e.currentTarget.style.backgroundColor = '#007bff';
+                    }
+                    e.currentTarget.style.transform = 'translateY(0)';
+                  }
+                }}
+              >
+                <img 
+                  src={voiceChatIcon} 
+                  alt="Voice Chat" 
+                  style={{
+                    width: '20px',
+                    height: '20px',
+                    borderRadius: '50%',
+                    animation: isRecording ? 'pulse 1s infinite' : 'none'
+                  }}
+                />
+                {isRecording ? 'Stop Recording' : (isAudioPlaying ? 'Audio Playing...' : 'Speak')}
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -864,62 +1164,6 @@ const LearningScreen: React.FC = () => {
           </button>
         </div>
       )}
-
-      {/* Interact Button */}
-      <div style={{
-        display: 'flex',
-        justifyContent: 'center',
-        marginTop: '20px'
-      }}>
-        <button
-          onClick={toggleRecording}
-          disabled={isAudioPlaying}
-          style={{
-            padding: '15px 30px',
-            backgroundColor: isRecording ? '#dc3545' : (isAudioPlaying ? '#6c757d' : '#007bff'),
-            color: 'white',
-            border: 'none',
-            borderRadius: '8px',
-            fontSize: '18px',
-            fontWeight: '600',
-            cursor: isAudioPlaying ? 'not-allowed' : 'pointer',
-            boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
-            transition: 'all 0.3s ease',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            opacity: isAudioPlaying ? 0.6 : 1
-          }}
-          onMouseOver={(e) => {
-            if (!isAudioPlaying) {
-              if (isRecording) {
-                e.currentTarget.style.backgroundColor = '#c82333';
-              } else {
-                e.currentTarget.style.backgroundColor = '#0056b3';
-              }
-              e.currentTarget.style.transform = 'translateY(-2px)';
-            }
-          }}
-          onMouseOut={(e) => {
-            if (!isAudioPlaying) {
-              if (isRecording) {
-                e.currentTarget.style.backgroundColor = '#dc3545';
-              } else {
-                e.currentTarget.style.backgroundColor = '#007bff';
-              }
-              e.currentTarget.style.transform = 'translateY(0)';
-            }
-          }}
-        >
-          <span style={{
-            fontSize: '20px',
-            animation: isRecording ? 'pulse 1s infinite' : 'none'
-          }}>
-            🎤
-          </span>
-          {isRecording ? 'Stop Recording' : (isAudioPlaying ? 'Audio Playing...' : 'Interact')}
-        </button>
-      </div>
 
       {/* Add CSS for animations */}
       <style>{`
