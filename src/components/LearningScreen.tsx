@@ -108,7 +108,7 @@ const LearningScreen: React.FC = () => {
           // Wait 3 seconds before classmate speaks
           setTimeout(() => {
             playAudioWithCallback(payload.audio_bytes);
-          }, 3000);
+          }, 1000);
         } else {
           markCommandComplete();
         }
