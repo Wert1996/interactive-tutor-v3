@@ -2,6 +2,11 @@ import React, { useEffect, useState, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import '../styles/LearningScreen.css';
 
+// Import character images
+import teacherImage from '../assets/characters/teacher.webp';
+import classmateImage from '../assets/characters/classmate.jpg';
+import studentImage from '../assets/characters/student.jpeg';
+
 interface SessionData {
   id: string;
   user_id: string;
@@ -62,6 +67,17 @@ const LearningScreen: React.FC = () => {
   const [commandQueue, setCommandQueue] = useState<CommandMessage[]>([]);
   const [shouldProcessNext, setShouldProcessNext] = useState<boolean>(false);
   
+  // Speaking states for characters
+  const [speakingStates, setSpeakingStates] = useState<{
+    teacher: boolean;
+    classmate: boolean;
+    student: boolean;
+  }>({
+    teacher: false,
+    classmate: false,
+    student: false
+  });
+  
   const websocketRef = useRef<WebSocket | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const completionCallbackRef = useRef<(() => void) | null>(null);
@@ -96,6 +112,9 @@ const LearningScreen: React.FC = () => {
     
     switch (command_type) {
       case 'TEACHER_SPEECH':
+        // Set teacher as speaking
+        setSpeakingStates(prev => ({ ...prev, teacher: true }));
+        
         if (payload.audio_bytes) {
           playAudioWithCallback(payload.audio_bytes);
         } else {
@@ -104,6 +123,9 @@ const LearningScreen: React.FC = () => {
         break;
         
       case 'CLASSMATE_SPEECH':
+        // Set classmate as speaking
+        setSpeakingStates(prev => ({ ...prev, classmate: true }));
+        
         if (payload.audio_bytes) {
           // Wait 3 seconds before classmate speaks
           setTimeout(() => {
@@ -186,6 +208,14 @@ const LearningScreen: React.FC = () => {
           audioRef.current?.removeEventListener('error', handleAudioError);
           URL.revokeObjectURL(audioUrl);
           setIsAudioPlaying(false);
+          
+          // Clear all speaking states when audio ends
+          setSpeakingStates({
+            teacher: false,
+            classmate: false,
+            student: false
+          });
+          
           markCommandComplete();
         };
         
@@ -195,6 +225,14 @@ const LearningScreen: React.FC = () => {
           audioRef.current?.removeEventListener('error', handleAudioError);
           URL.revokeObjectURL(audioUrl);
           setIsAudioPlaying(false);
+          
+          // Clear all speaking states on error
+          setSpeakingStates({
+            teacher: false,
+            classmate: false,
+            student: false
+          });
+          
           markCommandComplete();
         };
         
@@ -227,12 +265,17 @@ const LearningScreen: React.FC = () => {
       recorder.onstop = () => {
         stream.getTracks().forEach(track => track.stop());
         setIsRecording(false);
+        // Clear student speaking state when recording stops
+        setSpeakingStates(prev => ({ ...prev, student: false }));
       };
       
       setMediaRecorder(recorder);
       audioChunksRef.current = [];
       recorder.start();
       setIsRecording(true);
+      
+      // Set student as speaking when recording starts
+      setSpeakingStates(prev => ({ ...prev, student: true }));
     } catch (error) {
       console.error('Error starting recording:', error);
       alert('Error accessing microphone. Please check permissions.');
@@ -614,45 +657,177 @@ const LearningScreen: React.FC = () => {
       {/* Hidden Audio Element */}
       <audio ref={audioRef} style={{ display: 'none' }} />
 
-      {/* Whiteboard */}
-      <div className="whiteboard-container" style={{
-        backgroundColor: '#ffffff',
-        border: '2px solid #e9ecef',
-        borderRadius: '10px',
-        padding: '20px',
-        minHeight: '400px',
-        marginBottom: '20px',
-        boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
-        overflow: 'auto'
+      {/* Main Content Area */}
+      <div style={{
+        display: 'flex',
+        gap: '20px',
+        alignItems: 'flex-start'
       }}>
-        <h2 style={{ 
-          marginTop: '0', 
-          marginBottom: '20px',
-          color: '#333',
-          borderBottom: '2px solid #f8f9fa',
-          paddingBottom: '10px'
+        {/* Characters Panel */}
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '15px',
+          minWidth: '150px'
         }}>
-          Whiteboard
-        </h2>
-        <div 
-          className="whiteboard-content"
-          dangerouslySetInnerHTML={{ __html: whiteboardContent }}
-          style={{
-            lineHeight: '1.6',
-            fontSize: '16px',
-            color: '#444'
-          }}
-        />
-        {!whiteboardContent && (
-          <p style={{ 
-            color: '#6c757d', 
-            fontStyle: 'italic',
-            textAlign: 'center',
-            marginTop: '50px'
+          {/* Teacher */}
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: '8px'
           }}>
-            Whiteboard content will appear here...
-          </p>
-        )}
+            <div 
+              className={speakingStates.teacher ? 'speaking-teacher' : ''}
+              style={{
+                width: '150px',
+                height: '150px',
+                border: `4px solid ${speakingStates.teacher ? '#28a745' : '#e9ecef'}`,
+                borderRadius: '12px',
+                overflow: 'hidden',
+                boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
+                transition: 'border-color 0.3s ease'
+              }}
+            >
+              <img 
+                src={teacherImage} 
+                alt="Teacher"
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  objectFit: 'cover'
+                }}
+              />
+            </div>
+            <span style={{
+              fontSize: '14px',
+              fontWeight: '600',
+              color: '#333',
+              textAlign: 'center'
+            }}>
+              Ms. Milie
+            </span>
+          </div>
+          
+          {/* Student */}
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: '8px'
+          }}>
+            <div 
+              className={speakingStates.student ? 'speaking-student' : ''}
+              style={{
+                width: '150px',
+                height: '150px',
+                border: `4px solid ${speakingStates.student ? '#007bff' : '#e9ecef'}`,
+                borderRadius: '12px',
+                overflow: 'hidden',
+                boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
+                transition: 'border-color 0.3s ease'
+              }}
+            >
+              <img 
+                src={studentImage} 
+                alt="Student"
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  objectFit: 'cover'
+                }}
+              />
+            </div>
+            <span style={{
+              fontSize: '14px',
+              fontWeight: '600',
+              color: '#333',
+              textAlign: 'center'
+            }}>
+              You
+            </span>
+          </div>
+          
+          {/* Classmate */}
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: '8px'
+          }}>
+            <div 
+              className={speakingStates.classmate ? 'speaking-classmate' : ''}
+              style={{
+                width: '150px',
+                height: '150px',
+                border: `4px solid ${speakingStates.classmate ? '#ffc107' : '#e9ecef'}`,
+                borderRadius: '12px',
+                overflow: 'hidden',
+                boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
+                transition: 'border-color 0.3s ease'
+              }}
+            >
+              <img 
+                src={classmateImage} 
+                alt="Classmate"
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  objectFit: 'cover'
+                }}
+              />
+            </div>
+            <span style={{
+              fontSize: '14px',
+              fontWeight: '600',
+              color: '#333',
+              textAlign: 'center'
+            }}>
+              Sam
+            </span>
+          </div>
+        </div>
+
+        {/* Whiteboard */}
+        <div className="whiteboard-container" style={{
+          backgroundColor: '#ffffff',
+          border: '2px solid #e9ecef',
+          borderRadius: '10px',
+          padding: '20px',
+          minHeight: '70vh',
+          flex: 1,
+          boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
+          overflow: 'auto'
+        }}>
+          <h2 style={{ 
+            marginTop: '0', 
+            marginBottom: '20px',
+            color: '#333',
+            borderBottom: '2px solid #f8f9fa',
+            paddingBottom: '10px'
+          }}>
+            Whiteboard
+          </h2>
+          <div 
+            className="whiteboard-content"
+            dangerouslySetInnerHTML={{ __html: whiteboardContent }}
+            style={{
+              lineHeight: '1.6',
+              fontSize: '16px',
+              color: '#444'
+            }}
+          />
+          {!whiteboardContent && (
+            <p style={{ 
+              color: '#6c757d', 
+              fontStyle: 'italic',
+              textAlign: 'center',
+              marginTop: '50px'
+            }}>
+              Whiteboard content will appear here...
+            </p>
+          )}
+        </div>
       </div>
 
       {/* Finish Module Button */}
@@ -746,12 +921,42 @@ const LearningScreen: React.FC = () => {
         </button>
       </div>
 
-      {/* Add CSS for pulse animation */}
+      {/* Add CSS for animations */}
       <style>{`
         @keyframes pulse {
           0% { opacity: 1; }
           50% { opacity: 0.5; }
           100% { opacity: 1; }
+        }
+        
+        @keyframes speaking-blink-teacher {
+          0% { border-color: #28a745; }
+          50% { border-color: transparent; }
+          100% { border-color: #28a745; }
+        }
+        
+        @keyframes speaking-blink-student {
+          0% { border-color: #007bff; }
+          50% { border-color: transparent; }
+          100% { border-color: #007bff; }
+        }
+        
+        @keyframes speaking-blink-classmate {
+          0% { border-color: #ffc107; }
+          50% { border-color: transparent; }
+          100% { border-color: #ffc107; }
+        }
+        
+        .speaking-teacher {
+          animation: speaking-blink-teacher 1s infinite;
+        }
+        
+        .speaking-student {
+          animation: speaking-blink-student 1s infinite;
+        }
+        
+        .speaking-classmate {
+          animation: speaking-blink-classmate 1s infinite;
         }
       `}</style>
 
