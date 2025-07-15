@@ -66,6 +66,10 @@ const LearningScreen: React.FC = () => {
   const [showFeedback, setShowFeedback] = useState<boolean>(false);
   const [feedbackCorrect, setFeedbackCorrect] = useState<boolean>(false);
   
+  // Game state
+  const [currentGame, setCurrentGame] = useState<string | null>(null);
+  const [showGameOverlay, setShowGameOverlay] = useState<boolean>(false);
+  
   // Chat messages state
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [isChatCollapsed, setIsChatCollapsed] = useState<boolean>(false);
@@ -169,7 +173,7 @@ const LearningScreen: React.FC = () => {
         }
         
         if (payload.audio_bytes) {
-          // Wait 3 seconds before classmate speaks
+          // Wait 1 second before classmate speaks
           setTimeout(() => {
             playAudioWithCallback(payload.audio_bytes);
           }, 1000);
@@ -223,6 +227,29 @@ const LearningScreen: React.FC = () => {
         // Mark command as complete immediately so other commands can be processed
         // The button will remain visible until user clicks it
         markCommandComplete();
+        break;
+        
+      case 'GAME':
+        if (payload.code) {
+          try {
+            // Decode base64 encoded UTF-8 game code
+            const binaryString = atob(payload.code);
+            const bytes = new Uint8Array(binaryString.length);
+            for (let i = 0; i < binaryString.length; i++) {
+              bytes[i] = binaryString.charCodeAt(i);
+            }
+            const decoder = new TextDecoder('utf-8');
+            const decodedGameCode = decoder.decode(bytes);
+            setCurrentGame(decodedGameCode);
+            setShowGameOverlay(true);
+            // Completion will be handled by finishGame function
+          } catch (error) {
+            console.error('Error decoding game code:', error);
+            markCommandComplete();
+          }
+        } else {
+          markCommandComplete();
+        }
         break;
         
       default:
@@ -468,6 +495,13 @@ const LearningScreen: React.FC = () => {
     setSelectedBinaryChoice(null);
     setShowFeedback(false);
     setFeedbackCorrect(false);
+    markCommandComplete();
+  };
+
+  // Finish game
+  const finishGame = () => {
+    setCurrentGame(null);
+    setShowGameOverlay(false);
     markCommandComplete();
   };
 
@@ -1580,6 +1614,95 @@ const LearningScreen: React.FC = () => {
                 </button>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Game Overlay */}
+      {showGameOverlay && currentGame && (
+        <div className="game-popup-overlay" style={{
+          position: 'fixed',
+          top: '0',
+          left: '0',
+          right: '0',
+          bottom: '0',
+          backgroundColor: 'rgba(0, 0, 0, 0.5)',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: '1000'
+        }}>
+          <div className="game-popup" style={{
+            backgroundColor: 'white',
+            borderRadius: '12px',
+            padding: '20px',
+            maxWidth: '90vw',
+            maxHeight: '90vh',
+            width: '90vw',
+            height: '90vh',
+            display: 'flex',
+            flexDirection: 'column',
+            boxShadow: '0 10px 25px rgba(0,0,0,0.2)'
+          }}>
+            <h3 style={{
+              marginTop: '0',
+              marginBottom: '20px',
+              color: '#333',
+              fontSize: '20px',
+              textAlign: 'center'
+            }}>
+              🎮 Interactive Game
+            </h3>
+            
+            <div style={{
+              flex: 1,
+              border: '2px solid #e9ecef',
+              borderRadius: '8px',
+              overflow: 'hidden',
+              marginBottom: '20px'
+            }}>
+              <iframe
+                srcDoc={currentGame}
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  border: 'none'
+                }}
+                sandbox="allow-scripts allow-same-origin"
+                title="Interactive Game"
+              />
+            </div>
+            
+            <div style={{
+              display: 'flex',
+              justifyContent: 'center'
+            }}>
+              <button
+                onClick={finishGame}
+                style={{
+                  padding: '12px 24px',
+                  backgroundColor: '#28a745',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  fontSize: '16px',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+                  transition: 'all 0.3s ease'
+                }}
+                onMouseOver={(e) => {
+                  e.currentTarget.style.backgroundColor = '#218838';
+                  e.currentTarget.style.transform = 'translateY(-1px)';
+                }}
+                onMouseOut={(e) => {
+                  e.currentTarget.style.backgroundColor = '#28a745';
+                  e.currentTarget.style.transform = 'translateY(0)';
+                }}
+              >
+                Finish Game
+              </button>
+            </div>
           </div>
         </div>
       )}
