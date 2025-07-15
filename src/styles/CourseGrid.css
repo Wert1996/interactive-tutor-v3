@@ -6,9 +6,8 @@
 }
 
 .course-grid-header {
-  text-align: center;
   margin-bottom: 40px;
-  padding: 40px 0;
+  padding: 40px 30px;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   border-radius: 20px;
   color: white;
@@ -21,56 +20,82 @@
   align-items: center;
   max-width: 1000px;
   margin: 0 auto;
-  padding: 0 20px;
+  gap: 30px;
+}
+
+.header-left {
+  flex: 1;
+  min-width: 0; /* Allows text to truncate properly */
 }
 
 .header-left h1 {
   font-size: 2.5rem;
   font-weight: 700;
-  margin: 0 0 10px 0;
+  margin: 0 0 8px 0;
   text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+  line-height: 1.2;
 }
 
 .header-left p {
   font-size: 1.2rem;
   margin: 0;
   opacity: 0.9;
+  line-height: 1.4;
 }
 
 .header-right {
   display: flex;
   align-items: center;
+  flex-shrink: 0;
 }
 
 .user-info {
   display: flex;
   align-items: center;
-  gap: 15px;
+  gap: 16px;
+  flex-wrap: wrap;
 }
 
 .welcome-text {
   font-size: 1.1rem;
   font-weight: 500;
   opacity: 0.9;
+  white-space: nowrap;
+  min-width: max-content;
 }
 
 .sign-in-button,
-.sign-out-button {
-  padding: 12px 24px;
+.sign-out-button,
+.dashboard-button {
+  padding: 12px 20px;
   border: 2px solid white;
-  border-radius: 8px;
+  border-radius: 10px;
   background: transparent;
   color: white;
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.3s ease;
+  white-space: nowrap;
+  min-width: max-content;
+}
+
+.dashboard-button {
+  background: rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(10px);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 2px solid rgba(255, 255, 255, 0.6);
 }
 
 .sign-in-button:hover,
-.sign-out-button:hover {
+.sign-out-button:hover,
+.dashboard-button:hover {
   background: white;
   color: #667eea;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 15px rgba(255, 255, 255, 0.3);
 }
 
 .courses-grid {
@@ -265,23 +290,52 @@
 
 /* Responsive Design */
 @media (max-width: 768px) {
+  .course-grid-header {
+    padding: 30px 20px;
+  }
+  
   .header-content {
     flex-direction: column;
-    gap: 20px;
+    gap: 24px;
     text-align: center;
+    align-items: center;
+  }
+  
+  .header-left {
+    width: 100%;
   }
   
   .header-left h1 {
     font-size: 2rem;
+    margin-bottom: 12px;
   }
   
   .header-left p {
     font-size: 1rem;
   }
   
+  .header-right {
+    width: 100%;
+    justify-content: center;
+  }
+  
   .user-info {
     flex-direction: column;
-    gap: 10px;
+    gap: 12px;
+    width: 100%;
+    align-items: center;
+  }
+  
+  .welcome-text {
+    font-size: 1rem;
+  }
+  
+  .sign-in-button,
+  .sign-out-button,
+  .dashboard-button {
+    padding: 14px 24px;
+    font-size: 16px;
+    min-width: 200px;
   }
   
   .courses-grid {

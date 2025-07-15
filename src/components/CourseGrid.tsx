@@ -80,6 +80,12 @@ const CourseGrid: React.FC = () => {
             {isAuthenticated ? (
               <div className="user-info">
                 <span className="welcome-text">Welcome, {user?.name}!</span>
+                <button 
+                  onClick={() => navigate(`/dashboard/${user?.id}`)} 
+                  className="dashboard-button"
+                >
+                  📊 Dashboard
+                </button>
                 <button onClick={handleSignOut} className="sign-out-button">
                   Sign Out
                 </button>

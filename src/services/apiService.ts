@@ -122,6 +122,67 @@ async function apiRequest<T>(
   }
 }
 
+// Dashboard Types (based on Pydantic models)
+export interface SkillStats {
+  mastery_score: number;
+  retention_score?: number;
+  critical_thinking_score?: number;
+  problem_solving_score?: number;
+  creativity_score?: number;
+  communication_score?: number;
+  self_awareness_score?: number;
+  social_skills_score?: number;
+  emotional_intelligence_score?: number;
+}
+
+export interface UserStats {
+  streak: number;
+  total_learning_time: number;
+  overall_completion_rate: number;
+  total_lessons_started: number;
+  average_session_time: number;
+  learning_insights?: string;
+  skill_stats_history?: SkillStats[];
+  skill_stats_aggregate?: SkillStats;
+}
+
+export interface SessionStats {
+  session_id: string;
+  date: string;
+  mastery_score: number;
+  completion: number;
+  session_time: number;
+  engagement_score?: number;
+  questions_answered?: number;
+  questions_asked?: number;
+  comprehension_score?: number;
+  topic_wise_mastery?: Record<string, number>;
+  skill_stats?: SkillStats;
+}
+
+export type ActivityStatus = "completed" | "not_completed";
+
+export interface ParentActivity {
+  activity_name: string;
+  activity_description: string;
+  activity_type: string;
+  activity_duration: number;
+  objectives: string[];
+  activity_status: ActivityStatus;
+}
+
+export interface ParentStats {
+  recommendation_completion: number;
+  recommended_activities: ParentActivity[];
+}
+
+export interface Dashboard {
+  user_id: string;
+  user_stats: UserStats;
+  session_stats: SessionStats[];
+  parent_stats: ParentStats;
+}
+
 // API service functions
 export const apiService = {
   /**
@@ -172,6 +233,15 @@ export const apiService = {
    */
   async getUser(userId: string): Promise<User> {
     return apiRequest<User>(`/api/users/${userId}`);
+  },
+
+  /**
+   * Get dashboard data for a user
+   * @param userId - The ID of the user to fetch dashboard for
+   * @returns Promise<Dashboard>
+   */
+  async getDashboard(userId: string): Promise<Dashboard> {
+    return apiRequest<Dashboard>(`/api/dashboards/${userId}`);
   },
 };
 

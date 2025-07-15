@@ -4,6 +4,7 @@ import { UserProvider } from './contexts/UserContext';
 import CourseGrid from './components/CourseGrid';
 import CourseDetail from './components/CourseDetail';
 import LearningScreen from './components/LearningScreen';
+import Dashboard from './components/Dashboard';
 import './App.css';
 
 function App() {
@@ -15,6 +16,7 @@ function App() {
             <Route path="/" element={<CourseGrid />} />
             <Route path="/course/:courseId" element={<CourseDetail />} />
             <Route path="/course/:courseId/learn" element={<LearningScreen />} />
+            <Route path="/dashboard/:userId?" element={<Dashboard />} />
           </Routes>
         </div>
       </Router>
