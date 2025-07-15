@@ -22,6 +22,26 @@ export interface Course {
   topics: Topic[];
 }
 
+// User-related types
+export interface OnboardingData {
+  interests: string[];
+  hobbies: string[];
+  preferredAnalogies: string[];
+  age: number;
+}
+
+export interface User {
+  id: string;
+  name: string;
+  onboarding_data: OnboardingData;
+}
+
+export interface CreateUserRequest {
+  id: string;
+  name: string;
+  onboarding_data: OnboardingData;
+}
+
 // Session-related types
 export interface CreateSessionRequest {
   user_id: string;
@@ -131,6 +151,27 @@ export const apiService = {
       method: 'POST',
       body: JSON.stringify(request),
     });
+  },
+
+  /**
+   * Create a new user
+   * @param request - The user creation request
+   * @returns Promise<User>
+   */
+  async createUser(request: CreateUserRequest): Promise<User> {
+    return apiRequest<User>('/api/users', {
+      method: 'POST',
+      body: JSON.stringify(request),
+    });
+  },
+
+  /**
+   * Get a user by ID
+   * @param userId - The ID of the user to fetch
+   * @returns Promise<User>
+   */
+  async getUser(userId: string): Promise<User> {
+    return apiRequest<User>(`/api/users/${userId}`);
   },
 };
 

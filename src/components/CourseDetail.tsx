@@ -1,16 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useUser } from '../contexts/UserContext';
 import apiService from '../services/apiService';
 import type { Course, Session } from '../services/apiService';
 import '../styles/CourseDetail.css';
 
 const CourseDetail: React.FC = () => {
   const { courseId } = useParams<{ courseId: string }>();
+  const navigate = useNavigate();
+  const { user, isAuthenticated } = useUser();
   const [course, setCourse] = useState<Course | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [creatingSession, setCreatingSession] = useState(false);
-  const navigate = useNavigate();
 
   useEffect(() => {
     const fetchCourse = async () => {
@@ -22,8 +24,8 @@ const CourseDetail: React.FC = () => {
 
       try {
         setLoading(true);
-        const fetchedCourse = await apiService.getCourse(courseId);
-        setCourse(fetchedCourse);
+        const courseData = await apiService.getCourse(courseId);
+        setCourse(courseData);
       } catch (err) {
         setError('Failed to load course details. Please try again later.');
         console.error('Error fetching course:', err);
@@ -41,6 +43,12 @@ const CourseDetail: React.FC = () => {
       return;
     }
 
+    if (!isAuthenticated || !user) {
+      alert('Please sign in to start learning');
+      navigate('/');
+      return;
+    }
+
     setCreatingSession(true);
     
     try {
@@ -48,7 +56,7 @@ const CourseDetail: React.FC = () => {
       
       // Create session via API
       const sessionData: Session = await apiService.createSession({
-        user_id: 'user123', // TODO: Replace with actual user ID from auth
+        user_id: user.id,
         course_id: courseId,
       });
 
@@ -133,13 +141,15 @@ const CourseDetail: React.FC = () => {
             <button 
               onClick={handleStartLearning} 
               className="start-learning-button" 
-              disabled={creatingSession}
+              disabled={creatingSession || !isAuthenticated}
             >
               {creatingSession ? (
                 <>
                   <span className="loading-spinner-small"></span>
                   Creating Session...
                 </>
+              ) : !isAuthenticated ? (
+                'Please Sign In to Start Learning'
               ) : (
                 <>
                   🚀 Start Learning
@@ -150,35 +160,28 @@ const CourseDetail: React.FC = () => {
         </div>
       </div>
 
-      <div className="course-content">
-        <h2 className="curriculum-title">Course Curriculum</h2>
-        
-        <div className="topics-list">
-          {course.topics.map((topic, topicIndex) => (
-            <div key={topicIndex} className="topic-card">
-              <div className="topic-header">
-                <h3 className="topic-title">
-                  <span className="topic-number">{topicIndex + 1}</span>
-                  {topic.title}
-                </h3>
-                <span className="module-count">{topic.modules.length} modules</span>
-              </div>
-              
-              <p className="topic-description">{topic.description}</p>
-              
-              <div className="modules-list">
-                {topic.modules.map((module, moduleIndex) => (
-                  <div key={moduleIndex} className="module-item">
-                    <div className="module-icon">📄</div>
-                    <div className="module-content">
-                      <h4 className="module-title">{module.title}</h4>
+      <div className="course-detail-content">
+        <div className="course-outline">
+          <h2>Course Outline</h2>
+          <div className="topics-list">
+            {course.topics.map((topic, topicIndex) => (
+              <div key={topicIndex} className="topic-item">
+                <h3 className="topic-title">{topic.title}</h3>
+                <p className="topic-description">{topic.description}</p>
+                <div className="modules-list">
+                  {topic.modules.map((module, moduleIndex) => (
+                    <div key={moduleIndex} className="module-item">
+                      <div className="module-header">
+                        <span className="module-icon">📖</span>
+                        <h4 className="module-title">{module.title}</h4>
+                      </div>
                       <p className="module-description">{module.description}</p>
                     </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       </div>
     </div>
