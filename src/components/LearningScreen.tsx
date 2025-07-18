@@ -84,6 +84,10 @@ const LearningScreen: React.FC = () => {
   const [commandQueue, setCommandQueue] = useState<CommandMessage[]>([]);
   const [shouldProcessNext, setShouldProcessNext] = useState<boolean>(false);
   
+  // Inactivity detection states
+  const [isInactive, setIsInactive] = useState<boolean>(false);
+  const [showInactivityModal, setShowInactivityModal] = useState<boolean>(false);
+  
   // Speaking states for characters
   const [speakingStates, setSpeakingStates] = useState<{
     teacher: boolean;
@@ -101,6 +105,132 @@ const LearningScreen: React.FC = () => {
   const isProcessingRef = useRef<boolean>(false);  // Synchronous processing state
   const audioChunksRef = useRef<Blob[]>([]);  // Use ref for audio chunks to avoid stale closure issues
   const chatContainerRef = useRef<HTMLDivElement | null>(null);
+  const inactivityTimerRef = useRef<number | null>(null);
+  const pingIntervalRef = useRef<number | null>(null);
+
+  // Activity tracking and inactivity handling
+  const resetInactivityTimer = () => {
+    if (inactivityTimerRef.current) {
+      clearTimeout(inactivityTimerRef.current);
+    }
+    
+    // Set inactivity timer for 2 minutes (120000ms)
+    inactivityTimerRef.current = setTimeout(() => {
+      handleInactivity();
+    }, 120000);
+  };
+
+  const handleInactivity = () => {
+    console.log('User inactive - stopping pings and cleaning up connection');
+    setIsInactive(true);
+    setShowInactivityModal(true);
+    
+    // Clear ping interval
+    if (pingIntervalRef.current) {
+      clearInterval(pingIntervalRef.current);
+      pingIntervalRef.current = null;
+    }
+    
+    // Close WebSocket connection
+    if (websocketRef.current) {
+      websocketRef.current.close();
+      websocketRef.current = null;
+    }
+    
+    setConnectionStatus('disconnected');
+  };
+
+  const handleUserActive = () => {
+    console.log('User confirmed active - re-establishing connection');
+    setShowInactivityModal(false);
+    setIsInactive(false);
+    
+    // Re-establish WebSocket connection
+    if (sessionData) {
+      establishWebSocketConnection();
+    }
+    
+    // Reset inactivity timer
+    resetInactivityTimer();
+  };
+
+  const handleUserInactive = () => {
+    console.log('User confirmed inactive - keeping connection closed');
+    setShowInactivityModal(false);
+    // Keep isInactive as true, don't re-establish connection
+  };
+
+  const handleActivity = () => {
+    if (!isInactive) {
+      resetInactivityTimer();
+    }
+  };
+
+  const establishWebSocketConnection = () => {
+    const websocketUrl = 'ws://localhost:8000/learning-interface';
+    setConnectionStatus('connecting');
+    
+    const ws = new WebSocket(websocketUrl);
+    websocketRef.current = ws;
+
+    ws.onopen = () => {
+      console.log('WebSocket connected');
+      // Send ping to verify connection
+      ws.send(JSON.stringify({ 
+        type: "ping",
+        session_id: sessionData?.id
+      }));
+      
+      // Start sending ping messages every 30 seconds
+      pingIntervalRef.current = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN && !isInactive) {
+          console.log('Sending periodic ping');
+          ws.send(JSON.stringify({ 
+            type: "ping",
+            session_id: sessionData?.id
+          }));
+        }
+      }, 30000); // 30 seconds
+    };
+
+    ws.onclose = (event) => {
+      console.log('WebSocket disconnected');
+      setConnectionStatus('disconnected');
+      
+      // Clear ping interval when connection closes
+      if (pingIntervalRef.current) {
+        clearInterval(pingIntervalRef.current);
+        pingIntervalRef.current = null;
+      }
+    };
+
+    ws.onerror = (error) => {
+      console.error('WebSocket error:', error);
+      setConnectionStatus('disconnected');
+      
+      // Clear ping interval on error
+      if (pingIntervalRef.current) {
+        clearInterval(pingIntervalRef.current);
+        pingIntervalRef.current = null;
+      }
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        
+        // Check if data is an array
+        if (Array.isArray(data)) {
+          handleWebSocketMessage(data);
+        } else {
+          // Handle single message (fallback)
+          handleWebSocketMessage([data]);
+        }
+      } catch (error) {
+        console.error('Error parsing WebSocket message:', error);
+      }
+    };
+  };
 
   // Add chat message helper function
   const addChatMessage = (sender: 'teacher' | 'classmate' | 'student', message: string) => {
@@ -618,54 +748,60 @@ const LearningScreen: React.FC = () => {
   }, [courseId]);
 
   useEffect(() => {
-    if (sessionData) {
-      // Connect to WebSocket only after session data is loaded
-      const websocketUrl = 'ws://localhost:8000/learning-interface';
-      setConnectionStatus('connecting');
+    if (sessionData && !isInactive) {
+      // Connect to WebSocket only after session data is loaded and user is active
+      establishWebSocketConnection();
       
-      const ws = new WebSocket(websocketUrl);
-      websocketRef.current = ws;
-
-      ws.onopen = () => {
-        console.log('WebSocket connected');
-        // Send ping to verify connection
-        ws.send(JSON.stringify({ type: "ping" }));
-      };
-
-      ws.onclose = (event) => {
-        console.log('WebSocket disconnected');
-        setConnectionStatus('disconnected');
-      };
-
-      ws.onerror = (error) => {
-        console.error('WebSocket error:', error);
-        setConnectionStatus('disconnected');
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          
-          // Check if data is an array
-          if (Array.isArray(data)) {
-            handleWebSocketMessage(data);
-          } else {
-            // Handle single message (fallback)
-            handleWebSocketMessage([data]);
-          }
-        } catch (error) {
-          console.error('Error parsing WebSocket message:', error);
-        }
-      };
+      // Start inactivity timer
+      resetInactivityTimer();
 
       // Cleanup function
       return () => {
+        // Clear ping interval on cleanup
+        if (pingIntervalRef.current) {
+          clearInterval(pingIntervalRef.current);
+          pingIntervalRef.current = null;
+        }
+        
+        // Clear inactivity timer on cleanup
+        if (inactivityTimerRef.current) {
+          clearTimeout(inactivityTimerRef.current);
+          inactivityTimerRef.current = null;
+        }
+        
         if (websocketRef.current) {
           websocketRef.current.close();
         }
       };
     }
-  }, [sessionData]);
+  }, [sessionData, isInactive]);
+
+  // Set up activity event listeners
+  useEffect(() => {
+    const activityEvents = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart', 'click'];
+    
+    activityEvents.forEach(event => {
+      document.addEventListener(event, handleActivity, true);
+    });
+
+    // Start initial inactivity timer if not inactive
+    if (!isInactive && sessionData) {
+      resetInactivityTimer();
+    }
+
+    return () => {
+      // Clean up event listeners
+      activityEvents.forEach(event => {
+        document.removeEventListener(event, handleActivity, true);
+      });
+      
+      // Clear inactivity timer
+      if (inactivityTimerRef.current) {
+        clearTimeout(inactivityTimerRef.current);
+        inactivityTimerRef.current = null;
+      }
+    };
+  }, []);
 
   const getConnectionStatusColor = () => {
     switch (connectionStatus) {
@@ -1703,6 +1839,128 @@ const LearningScreen: React.FC = () => {
                 Finish Game
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Inactivity Modal */}
+      {showInactivityModal && (
+        <div className="inactivity-modal-overlay" style={{
+          position: 'fixed',
+          top: '0',
+          left: '0',
+          right: '0',
+          bottom: '0',
+          backgroundColor: 'rgba(0, 0, 0, 0.8)',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: '2000'
+        }}>
+          <div className="inactivity-modal" style={{
+            backgroundColor: 'white',
+            borderRadius: '12px',
+            padding: '40px',
+            maxWidth: '500px',
+            width: '90%',
+            textAlign: 'center',
+            boxShadow: '0 10px 25px rgba(0,0,0,0.3)',
+            border: '3px solid #ffc107'
+          }}>
+            <div style={{
+              fontSize: '48px',
+              marginBottom: '20px'
+            }}>
+              ⏰
+            </div>
+            
+            <h3 style={{
+              marginTop: '0',
+              marginBottom: '20px',
+              color: '#333',
+              fontSize: '24px',
+              fontWeight: '600'
+            }}>
+              Are you still there?
+            </h3>
+            
+            <p style={{
+              color: '#6c757d',
+              fontSize: '16px',
+              lineHeight: '1.5',
+              marginBottom: '30px'
+            }}>
+              We noticed you've been inactive for a while.
+              <br />
+              <strong>Would you like to continue your learning session?</strong>
+            </p>
+            
+            <div style={{
+              display: 'flex',
+              justifyContent: 'center',
+              gap: '20px'
+            }}>
+              <button
+                onClick={handleUserInactive}
+                style={{
+                  padding: '12px 24px',
+                  backgroundColor: '#6c757d',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  fontSize: '16px',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+                  transition: 'all 0.3s ease'
+                }}
+                onMouseOver={(e) => {
+                  e.currentTarget.style.backgroundColor = '#5a6268';
+                  e.currentTarget.style.transform = 'translateY(-1px)';
+                }}
+                onMouseOut={(e) => {
+                  e.currentTarget.style.backgroundColor = '#6c757d';
+                  e.currentTarget.style.transform = 'translateY(0)';
+                }}
+              >
+                No, I'm Done
+              </button>
+              
+              <button
+                onClick={handleUserActive}
+                style={{
+                  padding: '12px 24px',
+                  backgroundColor: '#28a745',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  fontSize: '16px',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+                  transition: 'all 0.3s ease'
+                }}
+                onMouseOver={(e) => {
+                  e.currentTarget.style.backgroundColor = '#218838';
+                  e.currentTarget.style.transform = 'translateY(-1px)';
+                }}
+                onMouseOut={(e) => {
+                  e.currentTarget.style.backgroundColor = '#28a745';
+                  e.currentTarget.style.transform = 'translateY(0)';
+                }}
+              >
+                Yes, I'm Still Here!
+              </button>
+            </div>
+            
+            <p style={{
+              color: '#6c757d',
+              fontSize: '12px',
+              marginTop: '20px',
+              marginBottom: '0'
+            }}>
+              If you don't respond, the connection will remain closed until you refresh the page.
+            </p>
           </div>
         </div>
       )}

@@ -141,7 +141,7 @@ export interface UserStats {
   overall_completion_rate: number;
   total_lessons_started: number;
   average_session_time: number;
-  learning_insights?: string;
+  learning_insights?: string[];
   skill_stats_history?: SkillStats[];
   skill_stats_aggregate?: SkillStats;
 }

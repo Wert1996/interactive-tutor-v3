@@ -292,14 +292,18 @@ const Dashboard: React.FC = () => {
           </div>
 
           {/* Learning Insights */}
-          {dashboardData.user_stats.learning_insights && (
+          {dashboardData.user_stats.learning_insights && dashboardData.user_stats.learning_insights.length > 0 && (
             <div className="insights-section">
               <h2>Learning Insights</h2>
               <div className="insights-card">
                 <div className="insights-icon">
                   <Award size={24} />
                 </div>
-                <p>{dashboardData.user_stats.learning_insights}</p>
+                <div className="insights-list">
+                  {dashboardData.user_stats.learning_insights.map((insight, index) => (
+                    <p key={index} className="insight-item">{insight}</p>
+                  ))}
+                </div>
               </div>
             </div>
           )}
