@@ -38,6 +38,12 @@ interface BinaryChoiceQuestion {
   correct: 'left' | 'right';
 }
 
+interface TwoPlayerGame {
+  game_type: string;
+  topic: string;
+  sides: [string, string];
+}
+
 interface CommandMessage {
   type: 'command';
   command: {
@@ -70,6 +76,16 @@ const LearningScreen: React.FC = () => {
   const [currentGame, setCurrentGame] = useState<string | null>(null);
   const [showGameOverlay, setShowGameOverlay] = useState<boolean>(false);
   
+  // Two-player game state
+  const [currentTwoPlayerGame, setCurrentTwoPlayerGame] = useState<TwoPlayerGame | null>(null);
+  const [showTwoPlayerGame, setShowTwoPlayerGame] = useState<boolean>(false);
+  const [gameTimer, setGameTimer] = useState<number>(180); // 3 minutes in seconds
+  const [timerActive, setTimerActive] = useState<boolean>(false);
+  const [chosenSide, setChosenSide] = useState<number | null>(null); // 0 for first side, 1 for second side
+  const [sideChosen, setSideChosen] = useState<boolean>(false);
+  const [studentPoints, setStudentPoints] = useState<string[]>([]);
+  const [classmatePoints, setClassmatePoints] = useState<string[]>([]);
+  
   // Chat messages state
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [isChatCollapsed, setIsChatCollapsed] = useState<boolean>(false);
@@ -87,6 +103,9 @@ const LearningScreen: React.FC = () => {
   // Inactivity detection states
   const [isInactive, setIsInactive] = useState<boolean>(false);
   const [showInactivityModal, setShowInactivityModal] = useState<boolean>(false);
+  
+  // Session tracking
+  const sessionStartedRef = useRef<boolean>(false);
   
   // Speaking states for characters
   const [speakingStates, setSpeakingStates] = useState<{
@@ -107,6 +126,7 @@ const LearningScreen: React.FC = () => {
   const chatContainerRef = useRef<HTMLDivElement | null>(null);
   const inactivityTimerRef = useRef<number | null>(null);
   const pingIntervalRef = useRef<number | null>(null);
+  const gameTimerRef = useRef<number | null>(null);
 
   // Activity tracking and inactivity handling
   const resetInactivityTimer = () => {
@@ -124,6 +144,7 @@ const LearningScreen: React.FC = () => {
     console.log('User inactive - stopping pings and cleaning up connection');
     setIsInactive(true);
     setShowInactivityModal(true);
+    sessionStartedRef.current = false; // Reset session tracking on inactivity
     
     // Clear ping interval
     if (pingIntervalRef.current) {
@@ -144,6 +165,7 @@ const LearningScreen: React.FC = () => {
     console.log('User confirmed active - re-establishing connection');
     setShowInactivityModal(false);
     setIsInactive(false);
+    sessionStartedRef.current = false; // Reset session tracking for new connection
     
     // Re-establish WebSocket connection
     if (sessionData) {
@@ -167,6 +189,12 @@ const LearningScreen: React.FC = () => {
   };
 
   const establishWebSocketConnection = () => {
+    // Prevent multiple connections
+    if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN) {
+      console.log('WebSocket already connected, skipping connection attempt');
+      return;
+    }
+    
     const websocketUrl = 'ws://localhost:8000/learning-interface';
     setConnectionStatus('connecting');
     
@@ -196,6 +224,7 @@ const LearningScreen: React.FC = () => {
     ws.onclose = (event) => {
       console.log('WebSocket disconnected');
       setConnectionStatus('disconnected');
+      sessionStartedRef.current = false; // Reset session tracking on disconnect
       
       // Clear ping interval when connection closes
       if (pingIntervalRef.current) {
@@ -207,6 +236,7 @@ const LearningScreen: React.FC = () => {
     ws.onerror = (error) => {
       console.error('WebSocket error:', error);
       setConnectionStatus('disconnected');
+      sessionStartedRef.current = false; // Reset session tracking on error
       
       // Clear ping interval on error
       if (pingIntervalRef.current) {
@@ -380,6 +410,43 @@ const LearningScreen: React.FC = () => {
         } else {
           markCommandComplete();
         }
+        break;
+        
+      case 'TWO_PLAYER_GAME':
+        if (payload.game_type && payload.topic && payload.sides) {
+          setCurrentTwoPlayerGame({
+            game_type: payload.game_type,
+            topic: payload.topic,
+            sides: payload.sides
+          });
+          setShowTwoPlayerGame(true);
+          setGameTimer(180); // Reset timer to 3 minutes
+          setTimerActive(false);
+          setChosenSide(null); // Reset side selection
+          setSideChosen(false); // Reset side chosen state
+          setStudentPoints([]); // Reset student points
+          setClassmatePoints([]); // Reset classmate points
+          // Mark command as complete immediately to allow other commands to process
+          markCommandComplete();
+        } else {
+          markCommandComplete();
+        }
+        break;
+        
+      case 'STUDENT_POINT':
+        if (payload.point) {
+          setStudentPoints(prev => [...prev, payload.point]);
+          console.log('Student point added:', payload.point);
+        }
+        markCommandComplete();
+        break;
+        
+      case 'CLASSMATE_POINT':
+        if (payload.point) {
+          setClassmatePoints(prev => [...prev, payload.point]);
+          console.log('Classmate point added:', payload.point);
+        }
+        markCommandComplete();
         break;
         
       default:
@@ -635,6 +702,88 @@ const LearningScreen: React.FC = () => {
     markCommandComplete();
   };
 
+  // Two-player game timer effect
+  useEffect(() => {
+    if (timerActive && gameTimer > 0) {
+      gameTimerRef.current = setTimeout(() => {
+        setGameTimer(prev => prev - 1);
+      }, 1000);
+    } else if (gameTimer === 0) {
+      // Timer finished
+      setTimerActive(false);
+      finishTwoPlayerGame();
+    }
+
+    return () => {
+      if (gameTimerRef.current) {
+        clearTimeout(gameTimerRef.current);
+      }
+    };
+  }, [timerActive, gameTimer]);
+
+  // Start two-player game timer
+  const startTwoPlayerGameTimer = () => {
+    setTimerActive(true);
+    
+    // Send start_two_player_game event to WebSocket
+    if (websocketRef.current && sessionData?.id && currentTwoPlayerGame && chosenSide !== null) {
+      const startGameMessage = {
+        type: "start_two_player_game",
+        payload: {
+          ...currentTwoPlayerGame,
+          chosen_side: chosenSide
+        },
+        session_id: sessionData.id
+      };
+      console.log('Sending start_two_player_game event:', startGameMessage);
+      websocketRef.current.send(JSON.stringify(startGameMessage));
+    }
+  };
+
+  // Finish two-player game
+  const finishTwoPlayerGame = () => {
+    // Send finish_two_player_game event to WebSocket
+    if (websocketRef.current && sessionData?.id) {
+      const finishGameMessage = {
+        type: "finish_two_player_game",
+        session_id: sessionData.id
+      };
+      console.log('Sending finish_two_player_game event:', finishGameMessage);
+      websocketRef.current.send(JSON.stringify(finishGameMessage));
+    }
+    
+    setCurrentTwoPlayerGame(null);
+    setShowTwoPlayerGame(false);
+    setTimerActive(false);
+    setGameTimer(180);
+    setChosenSide(null);
+    setSideChosen(false);
+    setStudentPoints([]);
+    setClassmatePoints([]);
+    
+    // Clear timer
+    if (gameTimerRef.current) {
+      clearTimeout(gameTimerRef.current);
+      gameTimerRef.current = null;
+    }
+    
+    // Command was already marked complete when the game started
+    // This function only cleans up the UI
+  };
+
+  // Format timer display
+  const formatTimer = (seconds: number) => {
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+  };
+
+  // Handle side selection
+  const handleSideSelection = (sideIndex: number) => {
+    setChosenSide(sideIndex);
+    setSideChosen(true);
+  };
+
   // Handle continue lesson button click
   const handleContinueLesson = () => {
     // Clear whiteboard and reset states BEFORE sending WebSocket message
@@ -682,8 +831,8 @@ const LearningScreen: React.FC = () => {
         case 'pong':
           setConnectionStatus('connected');
           
-          // Start session after successful connection using existing session ID
-          if (sessionData?.id) {
+          // Start session after successful connection using existing session ID (only once)
+          if (sessionData?.id && !sessionStartedRef.current) {
             const startSessionMessage = {
               type: "start_session",
               session_id: sessionData.id
@@ -691,8 +840,10 @@ const LearningScreen: React.FC = () => {
             
             if (websocketRef.current) {
               websocketRef.current.send(JSON.stringify(startSessionMessage));
+              sessionStartedRef.current = true; // Mark session as started
+              console.log('Session started for the first time');
             }
-          } else {
+          } else if (!sessionData?.id) {
             console.error('No session data available to start session');
           }
           break;
@@ -767,6 +918,12 @@ const LearningScreen: React.FC = () => {
         if (inactivityTimerRef.current) {
           clearTimeout(inactivityTimerRef.current);
           inactivityTimerRef.current = null;
+        }
+        
+        // Clear game timer on cleanup
+        if (gameTimerRef.current) {
+          clearTimeout(gameTimerRef.current);
+          gameTimerRef.current = null;
         }
         
         if (websocketRef.current) {
@@ -1009,7 +1166,7 @@ const LearningScreen: React.FC = () => {
           </div>
         </div>
 
-        {/* Whiteboard */}
+        {/* Whiteboard / Two-Player Game */}
         <div className="whiteboard-container" style={{
           backgroundColor: '#ffffff',
           border: '2px solid #e9ecef',
@@ -1020,33 +1177,620 @@ const LearningScreen: React.FC = () => {
           boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
           overflow: 'auto'
         }}>
-          <h2 style={{ 
-            marginTop: '0', 
-            marginBottom: '20px',
-            color: '#333',
-            borderBottom: '2px solid #f8f9fa',
-            paddingBottom: '10px'
-          }}>
-            Whiteboard
-          </h2>
-          <div 
-            className="whiteboard-content"
-            dangerouslySetInnerHTML={{ __html: whiteboardContent }}
-            style={{
-              lineHeight: '1.6',
-              fontSize: '16px',
-              color: '#444'
-            }}
-          />
-          {!whiteboardContent && (
-            <p style={{ 
-              color: '#6c757d', 
-              fontStyle: 'italic',
-              textAlign: 'center',
-              marginTop: '50px'
+          {/* Show Two-Player Game Interface */}
+          {showTwoPlayerGame && currentTwoPlayerGame ? (
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              height: '100%',
+              minHeight: '70vh'
             }}>
-              Whiteboard content will appear here...
-            </p>
+              {/* Timer - Show when side is chosen and game is active */}
+              {sideChosen && timerActive && (
+                <div style={{
+                  alignSelf: 'center',
+                  backgroundColor: '#f8f9fa',
+                  padding: '12px 25px',
+                  borderRadius: '20px',
+                  fontSize: '20px',
+                  fontWeight: 'bold',
+                  color: gameTimer <= 30 ? '#dc3545' : '#333',
+                  marginBottom: '20px',
+                  border: gameTimer <= 30 ? '2px solid #dc3545' : '2px solid #28a745'
+                }}>
+                  ⏱️ {formatTimer(gameTimer)}
+                </div>
+              )}
+
+              {/* Game Title */}
+              <h2 style={{
+                textAlign: 'center',
+                marginTop: '0',
+                marginBottom: '20px',
+                color: '#333',
+                fontSize: '24px',
+                fontWeight: 'bold'
+              }}>
+                🎮 {currentTwoPlayerGame.game_type.replace('_', ' ')}
+              </h2>
+
+              {/* Topic */}
+              <div style={{
+                backgroundColor: '#f8f9fa',
+                padding: '15px',
+                borderRadius: '8px',
+                marginBottom: '20px',
+                border: '1px solid #e9ecef'
+              }}>
+                <h3 style={{
+                  margin: '0',
+                  textAlign: 'center',
+                  color: '#495057',
+                  fontSize: '18px',
+                  fontWeight: '600'
+                }}>
+                  Topic: {currentTwoPlayerGame.topic}
+                </h3>
+              </div>
+
+              {/* Side Selection Interface */}
+              {!sideChosen && (
+                <div style={{ flex: 1 }}>
+                  <div style={{
+                    textAlign: 'center',
+                    marginBottom: '25px'
+                  }}>
+                    <h3 style={{
+                      color: '#333',
+                      fontSize: '20px',
+                      fontWeight: '600',
+                      marginBottom: '8px'
+                    }}>
+                      Choose Your Side
+                    </h3>
+                    <p style={{
+                      color: '#6c757d',
+                      fontSize: '14px',
+                      margin: '0'
+                    }}>
+                      Select which position you'd like to argue for in this debate
+                    </p>
+                  </div>
+
+                  {/* Side Selection Options */}
+                  <div style={{
+                    display: 'flex',
+                    gap: '20px',
+                    alignItems: 'stretch',
+                    height: '350px'
+                  }}>
+                    {/* Option 1 */}
+                    <div 
+                      onClick={() => handleSideSelection(0)}
+                      style={{
+                        flex: 1,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        padding: '20px',
+                        backgroundColor: '#f8f9fa',
+                        borderRadius: '12px',
+                        border: '2px solid #e9ecef',
+                        cursor: 'pointer',
+                        transition: 'all 0.3s ease'
+                      }}
+                      onMouseOver={(e) => {
+                        e.currentTarget.style.backgroundColor = '#e7f3ff';
+                        e.currentTarget.style.borderColor = '#007bff';
+                        e.currentTarget.style.transform = 'translateY(-3px)';
+                      }}
+                      onMouseOut={(e) => {
+                        e.currentTarget.style.backgroundColor = '#f8f9fa';
+                        e.currentTarget.style.borderColor = '#e9ecef';
+                        e.currentTarget.style.transform = 'translateY(0)';
+                      }}
+                    >
+                      <h4 style={{
+                        margin: '0 0 15px 0',
+                        color: '#495057',
+                        fontSize: '16px',
+                        fontWeight: 'bold',
+                        textAlign: 'center'
+                      }}>
+                        Side A
+                      </h4>
+                      
+                      <div style={{
+                        backgroundColor: 'white',
+                        padding: '15px',
+                        borderRadius: '8px',
+                        border: '1px solid #e9ecef',
+                        textAlign: 'center',
+                        fontSize: '14px',
+                        lineHeight: '1.4',
+                        color: '#333',
+                        fontWeight: '500',
+                        flex: 1,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center'
+                      }}>
+                        {currentTwoPlayerGame.sides[0]}
+                      </div>
+
+                      <button style={{
+                        marginTop: '15px',
+                        padding: '10px 20px',
+                        backgroundColor: '#007bff',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '6px',
+                        fontSize: '12px',
+                        fontWeight: '600',
+                        cursor: 'pointer'
+                      }}>
+                        Choose This Side
+                      </button>
+                    </div>
+
+                    {/* Option 2 */}
+                    <div 
+                      onClick={() => handleSideSelection(1)}
+                      style={{
+                        flex: 1,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        padding: '20px',
+                        backgroundColor: '#f8f9fa',
+                        borderRadius: '12px',
+                        border: '2px solid #e9ecef',
+                        cursor: 'pointer',
+                        transition: 'all 0.3s ease'
+                      }}
+                      onMouseOver={(e) => {
+                        e.currentTarget.style.backgroundColor = '#fff3cd';
+                        e.currentTarget.style.borderColor = '#ffc107';
+                        e.currentTarget.style.transform = 'translateY(-3px)';
+                      }}
+                      onMouseOut={(e) => {
+                        e.currentTarget.style.backgroundColor = '#f8f9fa';
+                        e.currentTarget.style.borderColor = '#e9ecef';
+                        e.currentTarget.style.transform = 'translateY(0)';
+                      }}
+                    >
+                      <h4 style={{
+                        margin: '0 0 15px 0',
+                        color: '#495057',
+                        fontSize: '16px',
+                        fontWeight: 'bold',
+                        textAlign: 'center'
+                      }}>
+                        Side B
+                      </h4>
+                      
+                      <div style={{
+                        backgroundColor: 'white',
+                        padding: '15px',
+                        borderRadius: '8px',
+                        border: '1px solid #e9ecef',
+                        textAlign: 'center',
+                        fontSize: '14px',
+                        lineHeight: '1.4',
+                        color: '#333',
+                        fontWeight: '500',
+                        flex: 1,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center'
+                      }}>
+                        {currentTwoPlayerGame.sides[1]}
+                      </div>
+
+                      <button style={{
+                        marginTop: '15px',
+                        padding: '10px 20px',
+                        backgroundColor: '#ffc107',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '6px',
+                        fontSize: '12px',
+                        fontWeight: '600',
+                        cursor: 'pointer'
+                      }}>
+                        Choose This Side
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Game Interface - Show after side is chosen */}
+              {sideChosen && chosenSide !== null && (
+                <div style={{ flex: 1 }}>
+                  {/* Two Sides */}
+                  <div style={{
+                    display: 'flex',
+                    gap: '15px',
+                    marginBottom: '15px',
+                    height: '400px'
+                  }}>
+                    {/* Student Side */}
+                    <div style={{
+                      flex: 1,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      padding: '15px',
+                      backgroundColor: '#e7f3ff',
+                      borderRadius: '10px',
+                      border: '2px solid #007bff',
+                      overflow: 'hidden'
+                    }}>
+                      <div style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        marginBottom: '12px'
+                      }}>
+                        <h4 style={{
+                          margin: '0 0 8px 0',
+                          color: '#0056b3',
+                          fontSize: '14px',
+                          fontWeight: 'bold',
+                          textAlign: 'center'
+                        }}>
+                          YOUR SIDE
+                        </h4>
+                        
+                        <div style={{
+                          width: '60px',
+                          height: '60px',
+                          borderRadius: '50%',
+                          overflow: 'hidden',
+                          border: '2px solid #007bff',
+                          marginBottom: '8px'
+                        }}>
+                          <img 
+                            src={studentImage} 
+                            alt="Student"
+                            style={{
+                              width: '100%',
+                              height: '100%',
+                              objectFit: 'cover'
+                            }}
+                          />
+                        </div>
+                      </div>
+
+                      <div style={{
+                        backgroundColor: 'white',
+                        padding: '8px',
+                        borderRadius: '6px',
+                        border: '1px solid #007bff',
+                        textAlign: 'center',
+                        fontSize: '10px',
+                        lineHeight: '1.2',
+                        color: '#333',
+                        fontWeight: '500',
+                        marginBottom: '10px'
+                      }}>
+                        {currentTwoPlayerGame.sides[chosenSide]}
+                      </div>
+
+                      {/* Student Points */}
+                      <div style={{
+                        flex: 1,
+                        overflowY: 'auto'
+                      }}>
+                        <h5 style={{
+                          margin: '0 0 8px 0',
+                          color: '#0056b3',
+                          fontSize: '12px',
+                          fontWeight: 'bold',
+                          textAlign: 'center'
+                        }}>
+                          Key Points
+                        </h5>
+                        <div style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '6px'
+                        }}>
+                          {studentPoints.map((point, index) => (
+                            <div key={index} style={{
+                              backgroundColor: 'rgba(255, 255, 255, 0.8)',
+                              padding: '6px 8px',
+                              borderRadius: '4px',
+                              border: '1px solid rgba(0, 123, 255, 0.3)',
+                              fontSize: '10px',
+                              lineHeight: '1.3',
+                              color: '#333'
+                            }}>
+                              <span style={{ fontWeight: '600', color: '#0056b3' }}>•</span> {point}
+                            </div>
+                          ))}
+                          {studentPoints.length === 0 && (
+                            <div style={{
+                              textAlign: 'center',
+                              color: '#6c757d',
+                              fontSize: '10px',
+                              fontStyle: 'italic',
+                              padding: '10px'
+                            }}>
+                              No points yet
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* VS Divider */}
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      minWidth: '30px'
+                    }}>
+                      <div style={{
+                        backgroundColor: '#ffc107',
+                        color: 'white',
+                        padding: '8px',
+                        borderRadius: '50%',
+                        fontSize: '14px',
+                        fontWeight: 'bold',
+                        border: '2px solid #e0a800'
+                      }}>
+                        VS
+                      </div>
+                    </div>
+
+                    {/* Classmate Side */}
+                    <div style={{
+                      flex: 1,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      padding: '15px',
+                      backgroundColor: '#fff3cd',
+                      borderRadius: '10px',
+                      border: '2px solid #ffc107',
+                      overflow: 'hidden'
+                    }}>
+                      <div style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        marginBottom: '12px'
+                      }}>
+                        <h4 style={{
+                          margin: '0 0 8px 0',
+                          color: '#856404',
+                          fontSize: '14px',
+                          fontWeight: 'bold',
+                          textAlign: 'center'
+                        }}>
+                          SAM'S SIDE
+                        </h4>
+                        
+                        <div style={{
+                          width: '60px',
+                          height: '60px',
+                          borderRadius: '50%',
+                          overflow: 'hidden',
+                          border: '2px solid #ffc107',
+                          marginBottom: '8px'
+                        }}>
+                          <img 
+                            src={classmateImage} 
+                            alt="Classmate"
+                            style={{
+                              width: '100%',
+                              height: '100%',
+                              objectFit: 'cover'
+                            }}
+                          />
+                        </div>
+                      </div>
+
+                      <div style={{
+                        backgroundColor: 'white',
+                        padding: '8px',
+                        borderRadius: '6px',
+                        border: '1px solid #ffc107',
+                        textAlign: 'center',
+                        fontSize: '10px',
+                        lineHeight: '1.2',
+                        color: '#333',
+                        fontWeight: '500',
+                        marginBottom: '10px'
+                      }}>
+                        {currentTwoPlayerGame.sides[chosenSide === 0 ? 1 : 0]}
+                      </div>
+
+                      {/* Classmate Points */}
+                      <div style={{
+                        flex: 1,
+                        overflowY: 'auto'
+                      }}>
+                        <h5 style={{
+                          margin: '0 0 8px 0',
+                          color: '#856404',
+                          fontSize: '12px',
+                          fontWeight: 'bold',
+                          textAlign: 'center'
+                        }}>
+                          Key Points
+                        </h5>
+                        <div style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '6px'
+                        }}>
+                          {classmatePoints.map((point, index) => (
+                            <div key={index} style={{
+                              backgroundColor: 'rgba(255, 255, 255, 0.8)',
+                              padding: '6px 8px',
+                              borderRadius: '4px',
+                              border: '1px solid rgba(255, 193, 7, 0.3)',
+                              fontSize: '10px',
+                              lineHeight: '1.3',
+                              color: '#333'
+                            }}>
+                              <span style={{ fontWeight: '600', color: '#856404' }}>•</span> {point}
+                            </div>
+                          ))}
+                          {classmatePoints.length === 0 && (
+                            <div style={{
+                              textAlign: 'center',
+                              color: '#6c757d',
+                              fontSize: '10px',
+                              fontStyle: 'italic',
+                              padding: '10px'
+                            }}>
+                              No points yet
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Teacher Section */}
+                  <div style={{
+                    display: 'flex',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    gap: '10px',
+                    padding: '10px',
+                    backgroundColor: '#e8f5e8',
+                    borderRadius: '6px',
+                    border: '1px solid #28a745',
+                    marginBottom: '15px'
+                  }}>
+                    <div style={{
+                      width: '40px',
+                      height: '40px',
+                      borderRadius: '50%',
+                      overflow: 'hidden',
+                      border: '2px solid #28a745'
+                    }}>
+                      <img 
+                        src={teacherImage} 
+                        alt="Teacher"
+                        style={{
+                          width: '100%',
+                          height: '100%',
+                          objectFit: 'cover'
+                        }}
+                      />
+                    </div>
+                    <div>
+                      <h5 style={{
+                        margin: '0 0 2px 0',
+                        color: '#155724',
+                        fontSize: '12px',
+                        fontWeight: 'bold'
+                      }}>
+                        Ms. Milie - Moderator
+                      </h5>
+                      <p style={{
+                        margin: '0',
+                        color: '#495057',
+                        fontSize: '10px'
+                      }}>
+                        Ready to moderate this debate!
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Game Controls */}
+                  <div style={{
+                    display: 'flex',
+                    justifyContent: 'center',
+                    gap: '10px'
+                  }}>
+                    {!timerActive ? (
+                      <button
+                        onClick={startTwoPlayerGameTimer}
+                        style={{
+                          padding: '12px 30px',
+                          backgroundColor: '#28a745',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '8px',
+                          fontSize: '16px',
+                          fontWeight: 'bold',
+                          cursor: 'pointer',
+                          transition: 'all 0.3s ease'
+                        }}
+                        onMouseOver={(e) => {
+                          e.currentTarget.style.backgroundColor = '#218838';
+                        }}
+                        onMouseOut={(e) => {
+                          e.currentTarget.style.backgroundColor = '#28a745';
+                        }}
+                      >
+                        🚀 Start Game!
+                      </button>
+                    ) : (
+                      <button
+                        onClick={finishTwoPlayerGame}
+                        style={{
+                          padding: '10px 25px',
+                          backgroundColor: '#dc3545',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '6px',
+                          fontSize: '14px',
+                          fontWeight: '600',
+                          cursor: 'pointer',
+                          transition: 'all 0.3s ease'
+                        }}
+                        onMouseOver={(e) => {
+                          e.currentTarget.style.backgroundColor = '#c82333';
+                        }}
+                        onMouseOut={(e) => {
+                          e.currentTarget.style.backgroundColor = '#dc3545';
+                        }}
+                      >
+                        End Game Early
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            /* Regular Whiteboard */
+            <>
+              <h2 style={{ 
+                marginTop: '0', 
+                marginBottom: '20px',
+                color: '#333',
+                borderBottom: '2px solid #f8f9fa',
+                paddingBottom: '10px'
+              }}>
+                Whiteboard
+              </h2>
+              <div 
+                className="whiteboard-content"
+                dangerouslySetInnerHTML={{ __html: whiteboardContent }}
+                style={{
+                  lineHeight: '1.6',
+                  fontSize: '16px',
+                  color: '#444'
+                }}
+              />
+              {!whiteboardContent && (
+                <p style={{ 
+                  color: '#6c757d', 
+                  fontStyle: 'italic',
+                  textAlign: 'center',
+                  marginTop: '50px'
+                }}>
+                  Whiteboard content will appear here...
+                </p>
+              )}
+            </>
           )}
         </div>
 
@@ -1305,17 +2049,19 @@ const LearningScreen: React.FC = () => {
         <div style={{
           display: 'flex',
           justifyContent: 'center',
-          marginTop: '20px'
+          marginTop: '10px',
+          position: 'relative',
+          zIndex: 10
         }}>
           <button
             onClick={handleContinueLesson}
             style={{
-              padding: '15px 30px',
+              padding: '12px 25px',
               backgroundColor: '#28a745',
               color: 'white',
               border: 'none',
               borderRadius: '8px',
-              fontSize: '18px',
+              fontSize: '16px',
               fontWeight: '600',
               cursor: 'pointer',
               boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
@@ -1964,6 +2710,8 @@ const LearningScreen: React.FC = () => {
           </div>
         </div>
       )}
+
+
     </div>
   );
 };
