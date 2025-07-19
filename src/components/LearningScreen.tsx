@@ -74,7 +74,8 @@ const LearningScreen: React.FC = () => {
   
   // Game state
   const [currentGame, setCurrentGame] = useState<string | null>(null);
-  const [showGameOverlay, setShowGameOverlay] = useState<boolean>(false);
+  const [showGame, setShowGame] = useState<boolean>(false);
+  const [isGameFullScreen, setIsGameFullScreen] = useState<boolean>(false);
   
   // Two-player game state
   const [currentTwoPlayerGame, setCurrentTwoPlayerGame] = useState<TwoPlayerGame | null>(null);
@@ -401,8 +402,8 @@ const LearningScreen: React.FC = () => {
             const decoder = new TextDecoder('utf-8');
             const decodedGameCode = decoder.decode(bytes);
             setCurrentGame(decodedGameCode);
-            setShowGameOverlay(true);
-            // Completion will be handled by finishGame function
+            setShowGame(true);
+            markCommandComplete();
           } catch (error) {
             console.error('Error decoding game code:', error);
             markCommandComplete();
@@ -697,9 +698,23 @@ const LearningScreen: React.FC = () => {
 
   // Finish game
   const finishGame = () => {
-    setCurrentGame(null);
-    setShowGameOverlay(false);
-    markCommandComplete();
+    handleContinueLesson();
+  };
+
+  const resetTwoPlayerGameState = () => {
+    setCurrentTwoPlayerGame(null);
+    setShowTwoPlayerGame(false);
+    setTimerActive(false);
+    setGameTimer(180);
+    setChosenSide(null);
+    setSideChosen(false);
+    setStudentPoints([]);
+    setClassmatePoints([]);
+
+    if (gameTimerRef.current) {
+      clearTimeout(gameTimerRef.current);
+      gameTimerRef.current = null;
+    }
   };
 
   // Two-player game timer effect
@@ -708,10 +723,19 @@ const LearningScreen: React.FC = () => {
       gameTimerRef.current = setTimeout(() => {
         setGameTimer(prev => prev - 1);
       }, 1000);
-    } else if (gameTimer === 0) {
+    } else if (gameTimer === 0 && timerActive) {
       // Timer finished
       setTimerActive(false);
-      finishTwoPlayerGame();
+      
+      // Send finish_two_player_game event to WebSocket but don't clear UI
+      if (websocketRef.current && sessionData?.id) {
+        const finishGameMessage = {
+          type: "finish_two_player_game",
+          session_id: sessionData.id
+        };
+        console.log('Sending finish_two_player_game event (timer ended):', finishGameMessage);
+        websocketRef.current.send(JSON.stringify(finishGameMessage));
+      }
     }
 
     return () => {
@@ -752,23 +776,7 @@ const LearningScreen: React.FC = () => {
       websocketRef.current.send(JSON.stringify(finishGameMessage));
     }
     
-    setCurrentTwoPlayerGame(null);
-    setShowTwoPlayerGame(false);
     setTimerActive(false);
-    setGameTimer(180);
-    setChosenSide(null);
-    setSideChosen(false);
-    setStudentPoints([]);
-    setClassmatePoints([]);
-    
-    // Clear timer
-    if (gameTimerRef.current) {
-      clearTimeout(gameTimerRef.current);
-      gameTimerRef.current = null;
-    }
-    
-    // Command was already marked complete when the game started
-    // This function only cleans up the UI
   };
 
   // Format timer display
@@ -797,6 +805,14 @@ const LearningScreen: React.FC = () => {
     setShowFeedback(false);
     setFeedbackCorrect(false);
     
+    setCurrentGame(null);
+    setShowGame(false);
+    setIsGameFullScreen(false);
+    
+    if (showTwoPlayerGame) {
+      resetTwoPlayerGameState();
+    }
+
     // Send next_phase message to WebSocket
     if (websocketRef.current && sessionData?.id) {
       const nextPhaseMessage = {
@@ -1759,6 +1775,80 @@ const LearningScreen: React.FC = () => {
                 </div>
               )}
             </div>
+          ) : showGame && currentGame ? (
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              height: '100%',
+              minHeight: '70vh'
+            }}>
+               <h2 style={{
+                textAlign: 'center',
+                marginTop: '0',
+                marginBottom: '20px',
+                color: '#333',
+                fontSize: '24px',
+                fontWeight: 'bold'
+              }}>
+                🎮 Interactive Game
+              </h2>
+              <div style={{
+                  flex: 1,
+                  flexBasis: '0',
+                  border: '2px solid #e9ecef',
+                  borderRadius: '8px',
+                  overflow: 'hidden',
+                  marginBottom: '20px',
+                  height: '60vh'
+                }}>
+                  <iframe
+                    srcDoc={currentGame}
+                    style={{
+                      width: '100%',
+                      height: '100%',
+                      border: 'none'
+                    }}
+                    sandbox="allow-scripts allow-same-origin"
+                    title="Interactive Game"
+                  />
+                </div>
+                <div style={{
+                  display: 'flex',
+                  justifyContent: 'center',
+                  gap: '20px'
+                }}>
+                  <button
+                    onClick={finishGame}
+                    style={{
+                      padding: '12px 24px',
+                      backgroundColor: '#dc3545',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '8px',
+                      fontSize: '16px',
+                      fontWeight: '600',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Finish Game
+                  </button>
+                  <button
+                    onClick={() => setIsGameFullScreen(!isGameFullScreen)}
+                    style={{
+                      padding: '12px 24px',
+                      backgroundColor: '#007bff',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '8px',
+                      fontSize: '16px',
+                      fontWeight: '600',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {isGameFullScreen ? 'Exit Full Screen' : 'Go Full Screen'}
+                  </button>
+                </div>
+            </div>
           ) : (
             /* Regular Whiteboard */
             <>
@@ -2501,7 +2591,7 @@ const LearningScreen: React.FC = () => {
       )}
 
       {/* Game Overlay */}
-      {showGameOverlay && currentGame && (
+      {isGameFullScreen && currentGame && (
         <div className="game-popup-overlay" style={{
           position: 'fixed',
           top: '0',
@@ -2560,7 +2650,7 @@ const LearningScreen: React.FC = () => {
               justifyContent: 'center'
             }}>
               <button
-                onClick={finishGame}
+                onClick={() => setIsGameFullScreen(false)}
                 style={{
                   padding: '12px 24px',
                   backgroundColor: '#28a745',
@@ -2582,7 +2672,7 @@ const LearningScreen: React.FC = () => {
                   e.currentTarget.style.transform = 'translateY(0)';
                 }}
               >
-                Finish Game
+                Exit Full Screen
               </button>
             </div>
           </div>
