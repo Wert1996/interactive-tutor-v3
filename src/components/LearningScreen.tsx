@@ -1949,7 +1949,7 @@ const LearningScreen: React.FC = () => {
           width: '350px',
           display: 'flex',
           flexDirection: 'column',
-          height: '85vh',
+          height: '75vh',
           gap: '15px'
         }}>
           {/* Notes Area */}
@@ -1960,7 +1960,7 @@ const LearningScreen: React.FC = () => {
             boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
             display: 'flex',
             flexDirection: 'column',
-            height: isChatCollapsed ? 'calc(70vh - 100px)' : 'calc(45vh - 7.5px)',
+            height: isChatCollapsed ? 'calc(70vh - 100px)' : 'calc(35vh - 7.5px)',
             transition: 'height 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
             zIndex: 10
           }}>
