@@ -1,10 +1,9 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import '../styles/LearningScreen.css';
+import apiService from '../services/apiService';
 
 // Import character images
-import teacherImage from '../assets/characters/teacher.webp';
-import classmateImage from '../assets/characters/classmate.jpg';
 import studentImage from '../assets/characters/student.jpeg';
 import voiceChatIcon from '../assets/voice-chat-icon.jpg';
 
@@ -14,6 +13,9 @@ interface SessionData {
   course_id: string;
   created_at: string;
   status: string;
+  characters: string[];
+  teacher?: FullCharacter;
+  classmate?: FullCharacter;
   progress: {
     topic_id: string;
     module_id: string;
@@ -59,10 +61,17 @@ interface ChatMessage {
   timestamp: Date;
 }
 
+interface FullCharacter {
+  name: string;
+  image_url: string;
+}
+
 const LearningScreen: React.FC = () => {
   const { courseId } = useParams<{ courseId: string }>();
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('disconnected');
   const [sessionData, setSessionData] = useState<SessionData | null>(null);
+  const [teacher, setTeacher] = useState<FullCharacter | null>(null);
+  const [classmate, setClassmate] = useState<FullCharacter | null>(null);
   const [whiteboardContent, setWhiteboardContent] = useState<string>('');
   const [currentQuestion, setCurrentQuestion] = useState<MCQQuestion | null>(null);
   const [currentBinaryQuestion, setCurrentBinaryQuestion] = useState<BinaryChoiceQuestion | null>(null);
@@ -915,6 +924,45 @@ const LearningScreen: React.FC = () => {
   }, [courseId]);
 
   useEffect(() => {
+    const fetchCharacterDetails = async () => {
+      if (sessionData && sessionData.teacher && sessionData.classmate) {
+        // Prefer character data included directly on the session object (new backend response)
+        setTeacher({ name: sessionData.teacher.name, image_url: sessionData.teacher.image_url });
+        setClassmate({ name: sessionData.classmate.name, image_url: sessionData.classmate.image_url });
+      } else if (sessionData && sessionData.characters && sessionData.characters.length >= 2) {
+        try {
+          console.log('Fetching character details for:', sessionData.characters);
+          const allCharacters = await apiService.getCharacters();
+          console.log('All available characters:', allCharacters);
+          
+          // Find characters based on the role instead of array position
+          const teacherChar = allCharacters.find(c => 
+            c.role === 'teacher' && sessionData.characters.includes(c.name)
+          );
+          const classmateChar = allCharacters.find(c => 
+            c.role === 'classmate' && sessionData.characters.includes(c.name)
+          );
+
+          console.log('Found teacher:', teacherChar);
+          console.log('Found classmate:', classmateChar);
+
+          if (teacherChar) {
+            setTeacher({ name: teacherChar.name, image_url: teacherChar.image_url });
+          }
+          if (classmateChar) {
+            setClassmate({ name: classmateChar.name, image_url: classmateChar.image_url });
+          }
+        } catch (error) {
+          console.error('Error fetching character details:', error);
+        }
+      } else {
+        console.log('Session data missing characters:', sessionData);
+      }
+    };
+    fetchCharacterDetails();
+  }, [sessionData]);
+
+  useEffect(() => {
     if (sessionData && !isInactive) {
       // Connect to WebSocket only after session data is loaded and user is active
       establishWebSocketConnection();
@@ -1084,12 +1132,15 @@ const LearningScreen: React.FC = () => {
               }}
             >
               <img 
-                src={teacherImage} 
-                alt="Teacher"
+                src={teacher?.image_url || '/placeholder-teacher.png'} 
+                alt={teacher?.name || 'Teacher'}
                 style={{
                   width: '100%',
                   height: '100%',
                   objectFit: 'cover'
+                }}
+                onError={(e) => {
+                  e.currentTarget.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTUwIiBoZWlnaHQ9IjE1MCIgdmlld0JveD0iMCAwIDE1MCAxNTAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxyZWN0IHdpZHRoPSIxNTAiIGhlaWdodD0iMTUwIiBmaWxsPSIjRjBGMEYwIi8+Cjx0ZXh0IHg9Ijc1IiB5PSI4MCIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjE0IiBmaWxsPSIjOTk5IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5UZWFjaGVyPC90ZXh0Pgo8L3N2Zz4K';
                 }}
               />
             </div>
@@ -1099,7 +1150,7 @@ const LearningScreen: React.FC = () => {
               color: '#333',
               textAlign: 'center'
             }}>
-              Ms. Milie
+              {teacher?.name || 'Teacher'}
             </span>
           </div>
           
@@ -1162,12 +1213,15 @@ const LearningScreen: React.FC = () => {
               }}
             >
               <img 
-                src={classmateImage} 
-                alt="Classmate"
+                src={classmate?.image_url || '/placeholder-classmate.png'} 
+                alt={classmate?.name || 'Classmate'}
                 style={{
                   width: '100%',
                   height: '100%',
                   objectFit: 'cover'
+                }}
+                onError={(e) => {
+                  e.currentTarget.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTUwIiBoZWlnaHQ9IjE1MCIgdmlld0JveD0iMCAwIDE1MCAxNTAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxyZWN0IHdpZHRoPSIxNTAiIGhlaWdodD0iMTUwIiBmaWxsPSIjRkZFQ0IzIi8+Cjx0ZXh0IHg9Ijc1IiB5PSI4MCIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjE0IiBmaWxsPSIjODU2NDA0IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5DbGFzc21hdGU8L3RleHQ+Cjwvc3ZnPgo=';
                 }}
               />
             </div>
@@ -1177,7 +1231,7 @@ const LearningScreen: React.FC = () => {
               color: '#333',
               textAlign: 'center'
             }}>
-              Sam
+              {classmate?.name || 'Classmate'}
             </span>
           </div>
         </div>
@@ -1584,7 +1638,7 @@ const LearningScreen: React.FC = () => {
                           fontWeight: 'bold',
                           textAlign: 'center'
                         }}>
-                          SAM'S SIDE
+                          {classmate?.name ? `${classmate.name.toUpperCase()}'S SIDE` : "CLASSMATE'S SIDE"}
                         </h4>
                         
                         <div style={{
@@ -1596,12 +1650,15 @@ const LearningScreen: React.FC = () => {
                           marginBottom: '8px'
                         }}>
                           <img 
-                            src={classmateImage} 
-                            alt="Classmate"
+                            src={classmate?.image_url || '/placeholder-classmate.png'} 
+                            alt={classmate?.name || 'Classmate'}
                             style={{
                               width: '100%',
                               height: '100%',
                               objectFit: 'cover'
+                            }}
+                            onError={(e) => {
+                              e.currentTarget.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTUwIiBoZWlnaHQ9IjE1MCIgdmlld0JveD0iMCAwIDE1MCAxNTAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxyZWN0IHdpZHRoPSIxNTAiIGhlaWdodD0iMTUwIiBmaWxsPSIjRkZFQ0IzIi8+Cjx0ZXh0IHg9Ijc1IiB5PSI4MCIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjE0IiBmaWxsPSIjODU2NDA0IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5DbGFzc21hdGU8L3RleHQ+Cjwvc3ZnPgo=';
                             }}
                           />
                         </div>
@@ -1690,12 +1747,15 @@ const LearningScreen: React.FC = () => {
                       border: '2px solid #28a745'
                     }}>
                       <img 
-                        src={teacherImage} 
-                        alt="Teacher"
+                        src={teacher?.image_url || '/placeholder-teacher.png'} 
+                        alt={teacher?.name || 'Teacher'}
                         style={{
                           width: '100%',
                           height: '100%',
                           objectFit: 'cover'
+                        }}
+                        onError={(e) => {
+                          e.currentTarget.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTUwIiBoZWlnaHQ9IjE1MCIgdmlld0JveD0iMCAwIDE1MCAxNTAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxyZWN0IHdpZHRoPSIxNTAiIGhlaWdodD0iMTUwIiBmaWxsPSIjRjBGMEYwIi8+Cjx0ZXh0IHg9Ijc1IiB5PSI4MCIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjE0IiBmaWxsPSIjOTk5IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5UZWFjaGVyPC90ZXh0Pgo8L3N2Zz4K';
                         }}
                       />
                     </div>
@@ -1706,7 +1766,7 @@ const LearningScreen: React.FC = () => {
                         fontSize: '12px',
                         fontWeight: 'bold'
                       }}>
-                        Ms. Milie - Moderator
+                        {teacher?.name || 'Teacher'} - Moderator
                       </h5>
                       <p style={{
                         margin: '0',
@@ -2043,8 +2103,8 @@ const LearningScreen: React.FC = () => {
                           color: msg.sender === 'teacher' ? '#28a745' : 
                                  msg.sender === 'classmate' ? '#856404' : '#0056b3'
                         }}>
-                          {msg.sender === 'teacher' ? 'Ms. Milie' : 
-                           msg.sender === 'classmate' ? 'Sam' : 'You'}
+                          {msg.sender === 'teacher' ? (teacher?.name || 'Teacher') : 
+                           msg.sender === 'classmate' ? (classmate?.name || 'Classmate') : 'You'}
                         </span>
                         <span style={{
                           fontSize: '10px',

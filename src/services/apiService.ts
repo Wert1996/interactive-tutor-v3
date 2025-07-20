@@ -42,10 +42,25 @@ export interface CreateUserRequest {
   onboarding_data: OnboardingData;
 }
 
+// Character-related types
+export interface Character {
+  role: 'teacher' | 'classmate';
+  name: string;
+  image_url: string;
+  age: number;
+  gender: string;
+  voice_id: string;
+  personality: string;
+  background: string;
+  world_description: string;
+  personal_life: string;
+}
+
 // Session-related types
 export interface CreateSessionRequest {
   user_id: string;
   course_id: string;
+  characters?: string[];
 }
 
 export interface SessionProgress {
@@ -242,6 +257,14 @@ export const apiService = {
    */
   async getDashboard(userId: string): Promise<Dashboard> {
     return apiRequest<Dashboard>(`/api/dashboards/${userId}`);
+  },
+
+  /**
+   * Get all available characters
+   * @returns Promise<Character[]>
+   */
+  async getCharacters(): Promise<Character[]> {
+    return apiRequest<Character[]>('/api/characters/all');
   },
 };
 

@@ -49,31 +49,7 @@ const CourseDetail: React.FC = () => {
       return;
     }
 
-    setCreatingSession(true);
-    
-    try {
-      console.log('Creating learning session for course:', courseId);
-      
-      // Create session via API
-      const sessionData: Session = await apiService.createSession({
-        user_id: user.id,
-        course_id: courseId,
-      });
-
-      // Store session data in localStorage
-      localStorage.setItem(`session_${courseId}`, JSON.stringify(sessionData));
-      
-      console.log('Session created successfully:', sessionData);
-      
-      // Navigate to learning screen
-      navigate(`/course/${courseId}/learn`);
-      
-    } catch (err) {
-      console.error('Error creating session:', err);
-      alert('Failed to create learning session. Please try again.');
-    } finally {
-      setCreatingSession(false);
-    }
+    navigate(`/course/${courseId}/character-selection`);
   };
 
   const handleBackToGrid = () => {
