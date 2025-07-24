@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useUser } from '../contexts/UserContext';
 import apiService from '../services/apiService';
-import type { Course, Session } from '../services/apiService';
+import type { Course } from '../services/apiService';
 import '../styles/CourseDetail.css';
 
 const CourseDetail: React.FC = () => {
@@ -12,7 +12,7 @@ const CourseDetail: React.FC = () => {
   const [course, setCourse] = useState<Course | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [creatingSession, setCreatingSession] = useState(false);
+  const [creatingSession, _] = useState(false);
 
   useEffect(() => {
     const fetchCourse = async () => {

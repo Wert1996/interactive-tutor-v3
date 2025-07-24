@@ -1,5 +1,5 @@
 // API Service for Interactive Tutor Backend
-const API_BASE_URL = 'http://localhost:8000';
+const API_BASE_URL = 'http://localhost:8080';
 
 // Type definitions based on the course structure
 export interface Module {
@@ -89,11 +89,12 @@ export interface ApiResponse<T> {
 export class ApiError extends Error {
   constructor(
     message: string,
-    public status: number,
-    public response?: any
+    status: number,
+    response?: any,
   ) {
     super(message);
     this.name = 'ApiError';
+    console.log(status, response);
   }
 }
 

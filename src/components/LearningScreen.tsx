@@ -7,6 +7,166 @@ import apiService from '../services/apiService';
 import studentImage from '../assets/characters/student.jpeg';
 import voiceChatIcon from '../assets/voice-chat-icon.jpg';
 
+/**
+ * Audio streaming player class for seamless chunk playback
+ * 
+ * This class handles streaming audio chunks from the backend to provide 
+ * seamless playback without stuttering between chunks. It uses the Web Audio API
+ * to schedule audio chunks to play consecutively.
+ * 
+ * Backend Integration:
+ * - For chunked audio: Send commands with payload.is_chunk = true, payload.stream_completed = true for last chunk
+ * - For complete audio: Send commands with payload.is_chunk = false or omit the field
+ * - New command types supported: 'TEACHER_AUDIO_CHUNK', 'CLASSMATE_AUDIO_CHUNK'
+ * - Existing command types still work: 'TEACHER_SPEECH', 'CLASSMATE_SPEECH'
+ * - Only the last command in a streaming sequence should have stream_completed = true
+ */
+class StreamingAudioPlayer {
+  private audioContext: AudioContext | null = null;
+  private nextStartTime: number = 0;
+  private isPlaying: boolean = false;
+  private pendingChunks: ArrayBuffer[] = [];
+  private isProcessing: boolean = false;
+  private onEndCallback: (() => void) | null = null;
+  private activeSourceNodes: AudioBufferSourceNode[] = [];
+  
+  async initialize(): Promise<void> {
+    if (!this.audioContext) {
+      this.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    }
+    
+    // Resume context if it's suspended (due to browser autoplay policies)
+    if (this.audioContext.state === 'suspended') {
+      await this.audioContext.resume();
+    }
+  }
+  
+  async addChunk(audioBytes: string): Promise<void> {
+    try {
+      // Convert base64 to ArrayBuffer
+      const binaryString = atob(audioBytes);
+      const bytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+      
+      this.pendingChunks.push(bytes.buffer);
+      
+      if (!this.isProcessing) {
+        this.processNextChunk();
+      }
+    } catch (error) {
+      console.error('Error adding audio chunk:', error);
+    }
+  }
+  
+  private async processNextChunk(): Promise<void> {
+    if (this.pendingChunks.length === 0 || !this.audioContext) {
+      this.isProcessing = false;
+      return;
+    }
+    
+    this.isProcessing = true;
+    
+    try {
+      const chunkBuffer = this.pendingChunks.shift()!;
+      const audioBuffer = await this.audioContext.decodeAudioData(chunkBuffer);
+      
+      const sourceNode = this.audioContext.createBufferSource();
+      sourceNode.buffer = audioBuffer;
+      sourceNode.connect(this.audioContext.destination);
+      
+      // Calculate when this chunk should start
+      const currentTime = this.audioContext.currentTime;
+      const startTime = Math.max(currentTime, this.nextStartTime);
+      
+      // Schedule the chunk to play
+      sourceNode.start(startTime);
+      this.activeSourceNodes.push(sourceNode);
+      
+      // Update next start time
+      this.nextStartTime = startTime + audioBuffer.duration;
+      
+      if (!this.isPlaying) {
+        this.isPlaying = true;
+      }
+      
+      // Handle chunk completion
+      sourceNode.onended = () => {
+        // Remove from active nodes
+        const index = this.activeSourceNodes.indexOf(sourceNode);
+        if (index > -1) {
+          this.activeSourceNodes.splice(index, 1);
+        }
+        
+        // Check if this was the last chunk and no more are pending
+        if (this.activeSourceNodes.length === 0 && this.pendingChunks.length === 0) {
+          this.isPlaying = false;
+          if (this.onEndCallback) {
+            this.onEndCallback();
+            this.onEndCallback = null;
+          }
+        }
+      };
+      
+      // Process next chunk if available
+      if (this.pendingChunks.length > 0) {
+        // Small delay to prevent overwhelming the audio context
+        setTimeout(() => this.processNextChunk(), 10);
+      } else {
+        this.isProcessing = false;
+      }
+      
+    } catch (error) {
+      console.error('Error processing audio chunk:', error);
+      this.isProcessing = false;
+      
+      // Continue with next chunk if available
+      if (this.pendingChunks.length > 0) {
+        setTimeout(() => this.processNextChunk(), 100);
+      }
+    }
+  }
+  
+  setOnEndCallback(callback: (() => void) | null): void {
+    this.onEndCallback = callback;
+  }
+  
+  stop(): void {
+    // Stop all active source nodes
+    this.activeSourceNodes.forEach(node => {
+      try {
+        node.stop();
+      } catch (e) {
+        // Node might already be stopped
+      }
+    });
+    
+    this.activeSourceNodes = [];
+    this.pendingChunks = [];
+    this.isPlaying = false;
+    this.isProcessing = false;
+    this.nextStartTime = 0;
+    
+    if (this.onEndCallback) {
+      this.onEndCallback();
+      this.onEndCallback = null;
+    }
+  }
+  
+  getIsPlaying(): boolean {
+    return this.isPlaying;
+  }
+  
+  dispose(): void {
+    this.stop();
+    if (this.audioContext && this.audioContext.state !== 'closed') {
+      this.audioContext.close();
+    }
+    this.audioContext = null;
+  }
+}
+
 interface SessionData {
   id: string;
   user_id: string;
@@ -106,6 +266,11 @@ const LearningScreen: React.FC = () => {
   const [isAudioPlaying, setIsAudioPlaying] = useState<boolean>(false);
   const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
   
+  // Streaming audio players
+  const [teacherAudioPlayer, setTeacherAudioPlayer] = useState<StreamingAudioPlayer | null>(null);
+  const [classmateAudioPlayer, setClassmateAudioPlayer] = useState<StreamingAudioPlayer | null>(null);
+  const [currentAudioSender, setCurrentAudioSender] = useState<'teacher' | 'classmate' | null>(null);
+  
   // Sequential processing state
   const [commandQueue, setCommandQueue] = useState<CommandMessage[]>([]);
   const [shouldProcessNext, setShouldProcessNext] = useState<boolean>(false);
@@ -156,6 +321,17 @@ const LearningScreen: React.FC = () => {
     setShowInactivityModal(true);
     sessionStartedRef.current = false; // Reset session tracking on inactivity
     
+    // Stop any playing audio
+    teacherAudioPlayer?.stop();
+    classmateAudioPlayer?.stop();
+    setIsAudioPlaying(false);
+    setCurrentAudioSender(null);
+    setSpeakingStates({
+      teacher: false,
+      classmate: false,
+      student: false
+    });
+    
     // Clear ping interval
     if (pingIntervalRef.current) {
       clearInterval(pingIntervalRef.current);
@@ -205,7 +381,7 @@ const LearningScreen: React.FC = () => {
       return;
     }
     
-    const websocketUrl = 'ws://localhost:8000/learning-interface';
+    const websocketUrl = 'ws://localhost:8080/learning-interface';
     setConnectionStatus('connecting');
     
     const ws = new WebSocket(websocketUrl);
@@ -231,7 +407,7 @@ const LearningScreen: React.FC = () => {
       }, 30000); // 30 seconds
     };
 
-    ws.onclose = (event) => {
+    ws.onclose = (_) => {
       console.log('WebSocket disconnected');
       setConnectionStatus('disconnected');
       sessionStartedRef.current = false; // Reset session tracking on disconnect
@@ -316,10 +492,24 @@ const LearningScreen: React.FC = () => {
     const { command_type, payload } = message.command;
     console.log('Processing command:', command_type);
     
+    // Check for speaker conflicts before processing speech commands
+    const isSpeechCommand = ['TEACHER_SPEECH', 'CLASSMATE_SPEECH', 'TEACHER_AUDIO_CHUNK', 'CLASSMATE_AUDIO_CHUNK'].includes(command_type);
+    const newSpeaker = command_type.includes('TEACHER') ? 'teacher' : 'classmate';
+    
+    if (isSpeechCommand && currentAudioSender && currentAudioSender !== newSpeaker) {
+      // Another speaker is active, requeue this command for later processing
+      console.log(`Requeuing ${command_type} - ${currentAudioSender} is currently speaking`);
+      setTimeout(() => {
+        handleCommandMessage(message);
+      }, 100);
+      return;
+    }
+    
     switch (command_type) {
       case 'TEACHER_SPEECH':
         // Set teacher as speaking
         setSpeakingStates(prev => ({ ...prev, teacher: true }));
+        setCurrentAudioSender('teacher');
         
         // Add teacher message to chat if text is available
         if (payload.text) {
@@ -327,7 +517,7 @@ const LearningScreen: React.FC = () => {
         }
         
         if (payload.audio_bytes) {
-          playAudioWithCallback(payload.audio_bytes);
+          playStreamingAudio('teacher', payload.audio_bytes, payload.is_chunk || false, payload.stream_completed || false);
         } else {
           markCommandComplete();
         }
@@ -336,6 +526,7 @@ const LearningScreen: React.FC = () => {
       case 'CLASSMATE_SPEECH':
         // Set classmate as speaking
         setSpeakingStates(prev => ({ ...prev, classmate: true }));
+        setCurrentAudioSender('classmate');
         
         // Add classmate message to chat if text is available
         if (payload.text) {
@@ -343,10 +534,39 @@ const LearningScreen: React.FC = () => {
         }
         
         if (payload.audio_bytes) {
-          // Wait 1 second before classmate speaks
+          // Wait 1 second before classmate speaks (only for first chunk or non-chunked audio)
+          const delay = (payload.is_chunk && payload.chunk_index > 0) ? 0 : 1000;
           setTimeout(() => {
-            playAudioWithCallback(payload.audio_bytes);
-          }, 1000);
+            playStreamingAudio('classmate', payload.audio_bytes, payload.is_chunk || false, payload.stream_completed || false);
+          }, delay);
+        } else {
+          markCommandComplete();
+        }
+        break;
+        
+      case 'TEACHER_AUDIO_CHUNK':
+        // Set teacher as speaking (for first chunk in sequence)
+        if (!currentAudioSender) {
+          setSpeakingStates(prev => ({ ...prev, teacher: true }));
+          setCurrentAudioSender('teacher');
+        }
+        
+        if (payload.audio_bytes) {
+          playStreamingAudio('teacher', payload.audio_bytes, true, payload.stream_completed || false);
+        } else {
+          markCommandComplete();
+        }
+        break;
+        
+      case 'CLASSMATE_AUDIO_CHUNK':
+        // Set classmate as speaking (for first chunk in sequence)
+        if (!currentAudioSender) {
+          setSpeakingStates(prev => ({ ...prev, classmate: true }));
+          setCurrentAudioSender('classmate');
+        }
+        
+        if (payload.audio_bytes) {
+          playStreamingAudio('classmate', payload.audio_bytes, true, payload.stream_completed || false);
         } else {
           markCommandComplete();
         }
@@ -466,7 +686,69 @@ const LearningScreen: React.FC = () => {
     }
   };
 
-  // Function to play base64 encoded audio with completion callback
+  // Function to play streaming audio (chunks or complete)
+  const playStreamingAudio = async (sender: 'teacher' | 'classmate', audioBytes: string, isChunk: boolean, isStreamCompleted: boolean) => {
+    
+    if (!isStreamCompleted) {
+      isChunk = true;
+    }
+
+    const audioPlayer = sender === 'teacher' ? teacherAudioPlayer : classmateAudioPlayer;
+    
+    if (!audioPlayer) {
+      console.error(`Audio player not initialized for ${sender}`);
+      markCommandComplete();
+      return;
+    }
+
+    try {
+      // Mutual exclusion is now handled at the command processing level
+
+      // Set audio playing state on first chunk or non-chunked audio
+      if (!isChunk || !audioPlayer.getIsPlaying()) {
+        setIsAudioPlaying(true);
+        
+        // Only set up completion callback when stream is completed
+        if (isStreamCompleted || !isChunk) {
+          audioPlayer.setOnEndCallback(() => {
+            setIsAudioPlaying(false);
+            setCurrentAudioSender(null);
+            
+            // Clear speaking states when audio ends
+            setSpeakingStates(prev => ({
+              ...prev,
+              [sender]: false
+            }));
+            
+            // Mark command complete when stream is completed
+            markCommandComplete();
+          });
+        }
+      }
+      
+      // Add the audio chunk to the player
+      await audioPlayer.addChunk(audioBytes);
+      
+      // Mark intermediate chunks as complete immediately to allow streaming
+      if (isChunk && !isStreamCompleted) {
+        // For intermediate chunks, mark complete immediately so next chunk can be processed
+        markCommandComplete();
+      }
+      // For stream completed or non-chunked audio, the completion callback will handle marking complete
+      
+    } catch (error) {
+      console.error('Error processing streaming audio:', error);
+      setIsAudioPlaying(false);
+      setCurrentAudioSender(null);
+      setSpeakingStates(prev => ({
+        ...prev,
+        [sender]: false
+      }));
+      markCommandComplete();
+    }
+  };
+
+  // Legacy function for fallback (keeping for compatibility)
   const playAudioWithCallback = (audioBytes: string) => {
     try {
       const audioBlob = new Blob([Uint8Array.from(atob(audioBytes), c => c.charCodeAt(0))], { type: 'audio/wav' });
@@ -803,6 +1085,17 @@ const LearningScreen: React.FC = () => {
 
   // Handle continue lesson button click
   const handleContinueLesson = () => {
+    // Stop any playing audio and reset audio states
+    teacherAudioPlayer?.stop();
+    classmateAudioPlayer?.stop();
+    setIsAudioPlaying(false);
+    setCurrentAudioSender(null);
+    setSpeakingStates({
+      teacher: false,
+      classmate: false,
+      student: false
+    });
+    
     // Clear whiteboard and reset states BEFORE sending WebSocket message
     // to avoid race condition with incoming responses
     setWhiteboardContent('');
@@ -923,6 +1216,34 @@ const LearningScreen: React.FC = () => {
     }
   }, [courseId]);
 
+  // Initialize streaming audio players
+  useEffect(() => {
+    const initializePlayers = async () => {
+      const teacherPlayer = new StreamingAudioPlayer();
+      const classmatePlayer = new StreamingAudioPlayer();
+      
+      try {
+        await teacherPlayer.initialize();
+        await classmatePlayer.initialize();
+        
+        setTeacherAudioPlayer(teacherPlayer);
+        setClassmateAudioPlayer(classmatePlayer);
+        
+        console.log('Streaming audio players initialized');
+      } catch (error) {
+        console.error('Failed to initialize audio players:', error);
+      }
+    };
+    
+    initializePlayers();
+    
+    // Cleanup function
+    return () => {
+      teacherAudioPlayer?.dispose();
+      classmateAudioPlayer?.dispose();
+    };
+  }, []);
+
   useEffect(() => {
     const fetchCharacterDetails = async () => {
       if (sessionData && sessionData.teacher && sessionData.classmate) {
@@ -990,6 +1311,10 @@ const LearningScreen: React.FC = () => {
           gameTimerRef.current = null;
         }
         
+        // Dispose audio players
+        teacherAudioPlayer?.dispose();
+        classmateAudioPlayer?.dispose();
+        
         if (websocketRef.current) {
           websocketRef.current.close();
         }
@@ -1034,19 +1359,6 @@ const LearningScreen: React.FC = () => {
         return '#ef4444'; // red
       default:
         return '#6b7280'; // gray
-    }
-  };
-
-  const getConnectionStatusText = () => {
-    switch (connectionStatus) {
-      case 'connected':
-        return sessionData?.id ? `Connected (${sessionData.id})` : 'Connected';
-      case 'connecting':
-        return 'Connecting...';
-      case 'disconnected':
-        return 'Disconnected';
-      default:
-        return 'Unknown';
     }
   };
 

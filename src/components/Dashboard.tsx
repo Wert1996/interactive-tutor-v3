@@ -1,17 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { 
-  BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, 
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, 
   Legend, ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, 
   PolarRadiusAxis, Radar 
 } from 'recharts';
 import { 
-  User, Activity, Clock, Target, TrendingUp, Award, 
+  User, Clock, Target, TrendingUp, Award, 
   BookOpen, Calendar, CheckCircle, Circle, ArrowLeft 
 } from 'lucide-react';
 import { useUser } from '../contexts/UserContext';
 import apiService from '../services/apiService';
-import type { Dashboard as DashboardData, SessionStats, ParentActivity } from '../services/apiService'
+import type { Dashboard as DashboardData, SessionStats } from '../services/apiService'
 import '../styles/Dashboard.css';
 
 const Dashboard: React.FC = () => {
@@ -315,7 +315,7 @@ const Dashboard: React.FC = () => {
           <div className="sessions-layout">
             <div className="sessions-list">
               <h2>Learning Sessions</h2>
-              {dashboardData.session_stats.map((session, index) => (
+              {dashboardData.session_stats.map((session, _) => (
                 <div 
                   key={session.session_id}
                   className={`session-item ${selectedSession?.session_id === session.session_id ? 'selected' : ''}`}
