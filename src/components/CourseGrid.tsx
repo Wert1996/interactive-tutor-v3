@@ -73,8 +73,8 @@ const CourseGrid: React.FC = () => {
       <header className="course-grid-header">
         <div className="header-content">
           <div className="header-left">
-            <h1>Interactive Learning Hub</h1>
-            <p>Discover amazing courses to enhance your skills</p>
+            <h1>Welcome to Koru</h1>
+            <p>Where learning becomes an adventure. Explore personalized courses with AI tutors who adapt to your pace.</p>
           </div>
           <div className="header-right">
             {isAuthenticated ? (

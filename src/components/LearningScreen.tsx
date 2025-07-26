@@ -274,7 +274,6 @@ const LearningScreen: React.FC = () => {
   // Streaming audio players
   const [teacherAudioPlayer, setTeacherAudioPlayer] = useState<StreamingAudioPlayer | null>(null);
   const [classmateAudioPlayer, setClassmateAudioPlayer] = useState<StreamingAudioPlayer | null>(null);
-  const [currentAudioSender, setCurrentAudioSender] = useState<'teacher' | 'classmate' | null>(null);
   
   // Sequential processing state
   const [commandQueue, setCommandQueue] = useState<CommandMessage[]>([]);
@@ -331,7 +330,6 @@ const LearningScreen: React.FC = () => {
     teacherAudioPlayer?.stop();
     classmateAudioPlayer?.stop();
     setIsAudioPlaying(false);
-    setCurrentAudioSender(null);
     setSpeakingStates({
       teacher: false,
       classmate: false,
@@ -387,7 +385,7 @@ const LearningScreen: React.FC = () => {
       return;
     }
     
-    const websocketUrl = 'ws://localhost:8080/learning-interface';
+    const websocketUrl = 'wss://ec2-54-173-83-52.compute-1.amazonaws.com/learning-interface';
     setConnectionStatus('connecting');
     
     const ws = new WebSocket(websocketUrl);
@@ -525,7 +523,6 @@ const LearningScreen: React.FC = () => {
       case 'TEACHER_SPEECH':
         // Set teacher as speaking
         setSpeakingStates(prev => ({ ...prev, teacher: true }));
-        setCurrentAudioSender('teacher');
         
         // Add teacher message to chat if text is available
         if (payload.text) {
@@ -542,7 +539,6 @@ const LearningScreen: React.FC = () => {
       case 'CLASSMATE_SPEECH':
         // Set classmate as speaking
         setSpeakingStates(prev => ({ ...prev, classmate: true }));
-        setCurrentAudioSender('classmate');
         
         // Add classmate message to chat if text is available
         if (payload.text) {
@@ -558,7 +554,7 @@ const LearningScreen: React.FC = () => {
         
       case 'WHITEBOARD':
         if (payload.html) {
-          setWhiteboardContent(prev => prev + payload.html);
+          setWhiteboardContent(payload.html);
           // Small delay to ensure rendering
           setTimeout(() => {
             markCommandComplete();
@@ -704,7 +700,6 @@ const LearningScreen: React.FC = () => {
         console.log('Setting on end callback for streaming audio - waiting for buffered audio to finish');
         audioPlayer.setOnEndCallback(() => {
             setIsAudioPlaying(false);
-            setCurrentAudioSender(null);
             
             // Clear speaking states when audio ends
             setSpeakingStates(prev => ({
@@ -721,7 +716,6 @@ const LearningScreen: React.FC = () => {
     } catch (error) {
       console.error('Error processing streaming audio:', error);
       setIsAudioPlaying(false);
-      setCurrentAudioSender(null);
       setSpeakingStates(prev => ({
         ...prev,
         [sender]: false
@@ -1011,7 +1005,6 @@ const LearningScreen: React.FC = () => {
     teacherAudioPlayer?.stop();
     classmateAudioPlayer?.stop();
     setIsAudioPlaying(false);
-    setCurrentAudioSender(null);
     setSpeakingStates({
       teacher: false,
       classmate: false,

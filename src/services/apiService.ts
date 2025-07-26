@@ -1,5 +1,6 @@
 // API Service for Interactive Tutor Backend
-const API_BASE_URL = 'http://localhost:8080';
+// const API_BASE_URL = 'http://localhost:8001';
+const API_BASE_URL = 'https://ec2-54-173-83-52.compute-1.amazonaws.com';
 
 // Type definitions based on the course structure
 export interface Module {
