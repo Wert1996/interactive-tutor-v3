@@ -1,4 +1,12 @@
-# React + TypeScript + Vite
+# Interactive AI Tutor
+## About this project
+
+Interactive Tutor v3 is a character-driven, AI-powered tutoring app. This repository contains the frontend built with React, TypeScript, and Vite.
+
+- **Backend**: The server-side code lives in `interactive-tutor-be`.
+- **Demo**: Watch the product walkthrough on Loom: [Interactive Tutor v3 Demo](https://www.loom.com/share/e96b33914a3a4bfb87dea8ddc0ec6aa2)
+
+---
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
